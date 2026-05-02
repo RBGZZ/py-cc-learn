@@ -1183,9 +1183,9 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "locust" },
-    { name = "memray" },
+    { name = "memray", marker = "sys_platform != 'win32'" },
     { name = "pre-commit" },
-    { name = "py-spy" },
+    { name = "py-spy", marker = "sys_platform != 'win32'" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -1206,10 +1206,10 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "locust", marker = "extra == 'dev'", specifier = ">=2.31.0" },
-    { name = "memray", marker = "extra == 'dev'", specifier = ">=1.14.0" },
+    { name = "memray", marker = "sys_platform != 'win32' and extra == 'dev'", specifier = ">=1.14.0" },
     { name = "pillow", specifier = ">=10.4.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8.0" },
-    { name = "py-spy", marker = "extra == 'dev'", specifier = ">=0.3.14" },
+    { name = "py-spy", marker = "sys_platform != 'win32' and extra == 'dev'", specifier = ">=0.3.14" },
     { name = "pydantic", specifier = ">=2.8.0" },
     { name = "pydantic-settings", specifier = ">=2.3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
@@ -1242,7 +1242,6 @@ wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/ca/01/6314152cf9ad3310ebacbf2c47b5ed858086530f8e12b1a665725ca5e0f4/py_spy-0.4.2-py2.py3-none-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:7f1c6d9b0e2379ead5bf792df43f4cf36153aa79e6dda4fb8ac7740cf8017110" },
     { url = "https://mirrors.aliyun.com/pypi/packages/cc/1f/0960a129d504728d28a51dbd5a04ce94031eb75bac676341da7aefdd8232/py_spy-0.4.2-py2.py3-none-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:24720573f95230653b457671a1dcc3c5a381fcf4e92677761e328a430ad251b2" },
     { url = "https://mirrors.aliyun.com/pypi/packages/f9/34/dd7d3c763a00b7b965e25a5eab0acd1a345dbaf0f45fffe595278873a1c0/py_spy-0.4.2-py2.py3-none-manylinux_2_5_x86_64.manylinux1_x86_64.whl", hash = "sha256:aeb0323409199c785f730645e9f4bb7a7b9ca2c481f2c331a55642b5d13fa52f" },
-    { url = "https://mirrors.aliyun.com/pypi/packages/6f/ed/1409cdb557e558a6c98003ab12fdd4284699e158c167c187cb0f124eea4c/py_spy-0.4.2-py2.py3-none-win_amd64.whl", hash = "sha256:8b06a353c177677e4e1701b288d8c58e2f8d4208ee81a8048d9f72ba800918f8" },
 ]
 
 [[package]]

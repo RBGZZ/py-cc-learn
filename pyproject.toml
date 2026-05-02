@@ -49,17 +49,13 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.6.0",
     "pre-commit>=3.8.0",
-    "py-spy>=0.3.14",
-    "memray>=1.14.0",
+    "py-spy>=0.3.14; sys_platform != 'win32'",
+    "memray>=1.14.0; sys_platform != 'win32'",
     "locust>=2.31.0",
 ]
 
 [project.scripts]
 haha = "server.cli:main"
-
-[[tool.uv.index]]
-url = "https://mirrors.aliyun.com/pypi/simple/"
-default = true
 
 [dependency-groups]
 dev = [
