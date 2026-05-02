@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -57,7 +57,7 @@ class PermissionRuleSource(str, Enum):
 
 class PermissionRuleValue(BaseModel):
     tool_name: str
-    rule_content: Optional[str] = None
+    rule_content: str | None = None
 
 
 class PermissionRule(BaseModel):
@@ -77,21 +77,21 @@ class PermissionUpdateDestination(str, Enum):
 class PermissionUpdateAddRules(BaseModel):
     type: Literal["addRules"]
     destination: PermissionUpdateDestination
-    rules: List[PermissionRuleValue]
+    rules: list[PermissionRuleValue]
     behavior: PermissionBehavior
 
 
 class PermissionUpdateReplaceRules(BaseModel):
     type: Literal["replaceRules"]
     destination: PermissionUpdateDestination
-    rules: List[PermissionRuleValue]
+    rules: list[PermissionRuleValue]
     behavior: PermissionBehavior
 
 
 class PermissionUpdateRemoveRules(BaseModel):
     type: Literal["removeRules"]
     destination: PermissionUpdateDestination
-    rules: List[PermissionRuleValue]
+    rules: list[PermissionRuleValue]
     behavior: PermissionBehavior
 
 
@@ -104,13 +104,13 @@ class PermissionUpdateSetMode(BaseModel):
 class PermissionUpdateAddDirectories(BaseModel):
     type: Literal["addDirectories"]
     destination: PermissionUpdateDestination
-    directories: List[str]
+    directories: list[str]
 
 
 class PermissionUpdateRemoveDirectories(BaseModel):
     type: Literal["removeDirectories"]
     destination: PermissionUpdateDestination
-    directories: List[str]
+    directories: list[str]
 
 
 PermissionUpdate = Union[
@@ -129,56 +129,108 @@ class AdditionalWorkingDirectory(BaseModel):
 
 
 class PermissionDecisionReasonRule(BaseModel):
-    type: Literal["rule"]
+    type: Literal["rule"] = "rule"
     rule: PermissionRule
 
 
 class PermissionDecisionReasonMode(BaseModel):
-    type: Literal["mode"]
+    type: Literal["mode"] = "mode"
     mode: PermissionMode
 
 
+class PermissionDecisionReasonSubcommandResults(BaseModel):
+    type: Literal["subcommandResults"] = "subcommandResults"
+    reasons: dict[str, "PermissionResult"] = Field(default_factory=dict)
+
+
+class PermissionDecisionReasonPermissionPromptTool(BaseModel):
+    type: Literal["permissionPromptTool"] = "permissionPromptTool"
+    permission_prompt_tool_name: str
+    tool_result: Any = None
+
+
+class PermissionDecisionReasonHook(BaseModel):
+    type: Literal["hook"] = "hook"
+    hook_name: str
+    hook_source: str | None = None
+    reason: str | None = None
+
+
+class PermissionDecisionReasonAsyncAgent(BaseModel):
+    type: Literal["asyncAgent"] = "asyncAgent"
+    reason: str
+
+
+class PermissionDecisionReasonSandboxOverride(BaseModel):
+    type: Literal["sandboxOverride"] = "sandboxOverride"
+    reason: Literal["excludedCommand", "dangerouslyDisableSandbox"]
+
+
+class PermissionDecisionReasonClassifier(BaseModel):
+    type: Literal["classifier"] = "classifier"
+    classifier: str
+    reason: str
+
+
+class PermissionDecisionReasonWorkingDir(BaseModel):
+    type: Literal["workingDir"] = "workingDir"
+    reason: str
+
+
+class PermissionDecisionReasonSafetyCheck(BaseModel):
+    type: Literal["safetyCheck"] = "safetyCheck"
+    reason: str
+    classifier_approvable: bool = False
+
+
 class PermissionDecisionReasonOther(BaseModel):
-    type: Literal["other"]
+    type: Literal["other"] = "other"
     reason: str
 
 
 PermissionDecisionReason = Union[
     PermissionDecisionReasonRule,
     PermissionDecisionReasonMode,
+    PermissionDecisionReasonSubcommandResults,
+    PermissionDecisionReasonPermissionPromptTool,
+    PermissionDecisionReasonHook,
+    PermissionDecisionReasonAsyncAgent,
+    PermissionDecisionReasonSandboxOverride,
+    PermissionDecisionReasonClassifier,
+    PermissionDecisionReasonWorkingDir,
+    PermissionDecisionReasonSafetyCheck,
     PermissionDecisionReasonOther,
-    Dict[str, Any],
 ]
 
 
 class PermissionAllowDecision(BaseModel):
     behavior: Literal["allow"]
-    updated_input: Optional[Dict[str, Any]] = None
-    user_modified: Optional[bool] = None
-    decision_reason: Optional[PermissionDecisionReason] = None
-    tool_use_id: Optional[str] = None
-    accept_feedback: Optional[str] = None
-    content_blocks: Optional[List[Dict[str, Any]]] = None
+    updated_input: dict[str, Any] | None = None
+    user_modified: bool | None = None
+    decision_reason: PermissionDecisionReason | None = None
+    tool_use_id: str | None = None
+    accept_feedback: str | None = None
+    content_blocks: list[dict[str, Any]] | None = None
 
 
 class PermissionAskDecision(BaseModel):
     behavior: Literal["ask"]
     message: str
-    updated_input: Optional[Dict[str, Any]] = None
-    decision_reason: Optional[PermissionDecisionReason] = None
-    suggestions: Optional[List[PermissionUpdate]] = None
-    blocked_path: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
-    is_bash_security_check_for_misparsing: Optional[bool] = None
-    pending_classifier_check: Optional[Dict[str, Any]] = None
-    content_blocks: Optional[List[Dict[str, Any]]] = None
+    updated_input: dict[str, Any] | None = None
+    decision_reason: PermissionDecisionReason | None = None
+    suggestions: list[PermissionUpdate] | None = None
+    blocked_path: str | None = None
+    metadata: dict[str, Any] | None = None
+    is_bash_security_check_for_misparsing: bool | None = None
+    pending_classifier_check: dict[str, Any] | None = None
+    content_blocks: list[dict[str, Any]] | None = None
 
 
 class PermissionDenyDecision(BaseModel):
     behavior: Literal["deny"]
     message: str
     decision_reason: PermissionDecisionReason
-    tool_use_id: Optional[str] = None
+    tool_use_id: str | None = None
 
 
 PermissionDecision = Union[PermissionAllowDecision, PermissionAskDecision, PermissionDenyDecision]
@@ -187,34 +239,83 @@ PermissionDecision = Union[PermissionAllowDecision, PermissionAskDecision, Permi
 class PermissionPassthrough(BaseModel):
     behavior: Literal["passthrough"]
     message: str
-    decision_reason: Optional[PermissionDecisionReason] = None
-    suggestions: Optional[List[PermissionUpdate]] = None
-    blocked_path: Optional[str] = None
-    pending_classifier_check: Optional[Dict[str, Any]] = None
+    decision_reason: PermissionDecisionReason | None = None
+    suggestions: list[PermissionUpdate] | None = None
+    blocked_path: str | None = None
+    pending_classifier_check: dict[str, Any] | None = None
 
 
 PermissionResult = Union[PermissionDecision, PermissionPassthrough]
 
 
 class ToolPermissionRulesBySource(BaseModel):
-    userSettings: Optional[List[str]] = None
-    projectSettings: Optional[List[str]] = None
-    localSettings: Optional[List[str]] = None
-    flagSettings: Optional[List[str]] = None
-    policySettings: Optional[List[str]] = None
-    cliArg: Optional[List[str]] = None
-    command: Optional[List[str]] = None
-    session: Optional[List[str]] = None
+    userSettings: list[str] | None = None
+    projectSettings: list[str] | None = None
+    localSettings: list[str] | None = None
+    flagSettings: list[str] | None = None
+    policySettings: list[str] | None = None
+    cliArg: list[str] | None = None
+    command: list[str] | None = None
+    session: list[str] | None = None
+
+
+class PendingClassifierCheck(BaseModel):
+    command: str
+    cwd: str
+    descriptions: list[str] = Field(default_factory=list)
 
 
 class ToolPermissionContext(BaseModel):
     mode: PermissionMode
-    additional_working_directories: Dict[str, AdditionalWorkingDirectory] = Field(default_factory=dict)
-    always_allow_rules: ToolPermissionRulesBySource = Field(default_factory=ToolPermissionRulesBySource)
-    always_deny_rules: ToolPermissionRulesBySource = Field(default_factory=ToolPermissionRulesBySource)
-    always_ask_rules: ToolPermissionRulesBySource = Field(default_factory=ToolPermissionRulesBySource)
+    additional_working_directories: dict[str, AdditionalWorkingDirectory] = Field(
+        default_factory=dict
+    )
+    always_allow_rules: ToolPermissionRulesBySource = Field(
+        default_factory=ToolPermissionRulesBySource
+    )
+    always_deny_rules: ToolPermissionRulesBySource = Field(
+        default_factory=ToolPermissionRulesBySource
+    )
+    always_ask_rules: ToolPermissionRulesBySource = Field(
+        default_factory=ToolPermissionRulesBySource
+    )
     is_bypass_permissions_mode_available: bool = False
-    stripped_dangerous_rules: Optional[ToolPermissionRulesBySource] = None
-    should_avoid_permission_prompts: Optional[bool] = None
-    await_automated_checks_before_dialog: Optional[bool] = None
-    pre_plan_mode: Optional[PermissionMode] = None
+    stripped_dangerous_rules: ToolPermissionRulesBySource | None = None
+    should_avoid_permission_prompts: bool | None = None
+    await_automated_checks_before_dialog: bool | None = None
+    pre_plan_mode: PermissionMode | None = None
+
+
+PROTECTED_NAMESPACES = [
+    ".git",
+    ".claude",
+    ".vscode",
+    ".cursor",
+    ".windsurf",
+    ".trae",
+]
+
+SENSITIVE_SHELL_FILES = [
+    ".bashrc",
+    ".bash_profile",
+    ".profile",
+    ".zshrc",
+    ".config/fish/config.fish",
+    "shell.nix",
+]
+
+PERMISSION_RULE_SOURCES: list[PermissionRuleSource] = [
+    PermissionRuleSource.USER_SETTINGS,
+    PermissionRuleSource.PROJECT_SETTINGS,
+    PermissionRuleSource.LOCAL_SETTINGS,
+    PermissionRuleSource.FLAG_SETTINGS,
+    PermissionRuleSource.POLICY_SETTINGS,
+    PermissionRuleSource.CLI_ARG,
+    PermissionRuleSource.COMMAND,
+    PermissionRuleSource.SESSION,
+]
+
+DENIAL_LIMITS = {
+    "max_consecutive": 3,
+    "max_total": 20,
+}
