@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+*.egg
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# 环境变量（含 API Key，绝对不能提交）
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# 会话数据
+*.jsonl
