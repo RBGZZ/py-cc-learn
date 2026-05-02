@@ -1,4 +1,4 @@
-# py-cc-learn &nbsp;`v0.1.2-pre`
+# py-cc-learn &nbsp;`v0.1.3-pre`
 
 > **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; ⚠️ 预发布版本，仍在积极开发中
 
