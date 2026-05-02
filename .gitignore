@@ -17,5 +17,8 @@ node_modules/
 .vscode/
 .idea/
 
+# 日志
+*.log
+
 # 会话数据
 *.jsonl
