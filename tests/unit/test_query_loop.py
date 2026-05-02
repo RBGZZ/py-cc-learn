@@ -391,10 +391,11 @@ class TestYieldMissingToolResults:
 class TestInterruptionMessage:
     def test_interruption_message_format(self):
         msg = _make_interruption_message()
-        assert msg["type"] == "stream_event"
-        assert msg["data"]["type"] == "system"
-        assert msg["data"]["subtype"] == "interrupted"
-        assert "Interrupted" in msg["data"]["message"]
+        assert msg["type"] == "user"
+        assert msg["is_meta"] is True
+        content = msg["message"]["content"]
+        assert isinstance(content, list)
+        assert any("Interrupted" in c.get("text", "") for c in content if isinstance(c, dict))
 
 
 class TestNormalizeMessages:

@@ -1,4 +1,4 @@
-# py-cc-learn &nbsp;`v0.1.1-pre`
+# py-cc-learn &nbsp;`v0.1.2-pre`
 
 > **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; ⚠️ 预发布版本，仍在积极开发中
 
@@ -10,8 +10,9 @@
 
 | 版本 | 状态 | 说明 |
 |------|------|------|
-| `v0.1.1-pre` | 🟡 预发布 | 核心功能完成，性能调优中 |
-| 目标 `v0.2.0` | ⬜ 计划中 | 上下文压缩管线 + 完整恢复机制 |
+| `v0.1.2-pre` | 🟡 预发布 | 核心功能完成，性能对齐 TS 参考，6 gaps closed |
+| `v0.1.1-pre` | ✅ 已发布 | 并行工具执行 + CI 修复 |
+| 目标 `v0.2.0` | ⬜ 计划中 | 上下文压缩管线
 
 **当前仍在积极开发中，不保证 API 稳定性。**
 
@@ -23,9 +24,12 @@
 - **Web 前端** — Vue 3 + Vite + Pinia，SSE 流式响应，支持 Markdown 渲染、图片粘贴
 - **Docker 沙箱** — 容器预热池 + tree-sitter AST 安全校验 + 三层安全漏斗
 - **完整工具系统** — Bash / Read / Write / Edit / Glob / Grep / TodoWrite / WebSearch / WebFetch / Agent / Skill / PlanMode
+- **并行工具执行** — StreamingToolExecutor 流式并行调度，并发安全工具同时执行，非并发工具保持串行
+- **流式工具启动** — 模型 SSE 输出中即刻排队工具执行，降低首字延迟
+- **错误恢复管线** — max_output_tokens 升级+多次恢复 / 模型 fallback 自动切换 / missing tool_result 合成
 - **权限管道** — 7 种权限模式 + 4 阶段决策管道 + 11 种决策原因
-- **Hook 系统** — 27 种事件类型 + 4 种执行类型
-- **上下文压缩** — Micro-Compact + Auto-Compact (180K token 阈值)
+- **Hook 系统** — 27 种事件类型 + Post-sampling / Stop hooks 可注册 API
+- **上下文压缩** — Auto-Compact (180K token 阈值) + compact_boundary_index
 - **CLI 入口** — `python -m server.cli` 兼容 `--model` / `--resume` / `--cwd`
 - **结构化日志** — structlog + RotatingFileHandler + request_id 全链路追踪
 - **优雅关闭** — SIGTERM → 等待请求 → 清理子进程 → flush session → 退出
@@ -87,11 +91,12 @@ py-cc-learn/
 │   ├── main.py                # 应用入口，SSE 端点，中间件
 │   ├── cli.py                 # CLI 入口
 │   ├── engine/                # Agent 引擎层
-│   │   └── query_engine.py    # QueryEngine + 10 种退出条件
+│   │   └── query_engine.py    # QueryEngine + 11 退出条件 + 流式并行工具执行
 │   ├── tools/                 # 工具系统 (16 个工具)
 │   │   ├── bash_tool.py       # Shell 执行 + tree-sitter 安全校验
 │   │   ├── file_*.py          # 文件读写编辑
 │   │   ├── agent_tool.py      # 子 Agent 系统
+│   │   ├── streaming.py        # StreamingToolExecutor 并行调度
 │   │   └── ...
 │   ├── services/              # 服务层
 │   │   ├── provider.py        # Provider 抽象基类
@@ -129,7 +134,8 @@ py-cc-learn/
 │   ├── nginx.conf             # 反向代理
 │   ├── docker-compose.yml     # 容器编排
 │   └── README.md              # 部署指南
-├── tests/                     # 228 单元/集成/E2E 测试
+├── tests/                     # 237 单元/集成/E2E 测试
+├── tools/                     # 性能基准测试
 ├── .trae/specs/python-rewrite/ # 技术规格文档
 └── .github/workflows/         # CI 跨平台矩阵
 ```
@@ -150,10 +156,11 @@ py-cc-learn/
 | Phase 7 | 子 Agent + 扩展工具 | ✅ |
 | Phase 8 | Vue 3 Web 前端 | ✅ |
 | Phase 9 | FastAPI 路由 + CLI + Git + 图像 + LSP + MCP | ✅ |
-| Phase 10 | 测试 (228 tests) + CI | ✅ |
+| Phase 10 | 测试 (237 tests) + CI | ✅ |
 | Phase 11 | 部署 + 验收 | ✅ |
+| Phase 12 | 性能对齐 TS 参考 (6 gaps closed) | ✅ |
 
-**49/49 Task 完成 · 293/293 Checklist 通过 · 228 tests passed · v0.1.1-pre**
+**49/49 Task 完成 · 293/293 Checklist 通过 · 237 tests passed · v0.1.2-pre**
 
 ---
 
@@ -177,6 +184,9 @@ uv run pytest tests/ -q
 
 # 覆盖率报告
 uv run pytest tests/ --cov=server --cov-report=term
+
+# 并行工具执行性能基准
+uv run python tools/benchmark_real.py
 
 # 源码一致性验证
 uv run python tests/verify_models.py

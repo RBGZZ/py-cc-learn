@@ -415,7 +415,8 @@ class QueryEngine:
                             yield ev
 
             if not needs_follow_up:
-                self._check_token_budget_on_state()
+                if self._check_token_budget_on_state():
+                    needs_follow_up = True
                 if self._is_max_output_tokens_from_msgs(assistant_msgs):
                     handled = self._handle_max_output_tokens_recovery()
                     if handled:
@@ -429,7 +430,15 @@ class QueryEngine:
                         }
                         return
 
-                self._execute_stop_hooks()
+                stop_result = self._execute_stop_hooks()
+                if stop_result.get("prevent_continuation"):
+                    yield {
+                        "type": "exit",
+                        "data": {"reason": QueryExitReason.STOP_HOOK_PREVENTED.value},
+                    }
+                    return
+                if stop_result.get("blocking_errors"):
+                    needs_follow_up = True
 
             if not needs_follow_up:
                 yield {
@@ -681,10 +690,20 @@ class QueryEngine:
             with contextlib.suppress(Exception):
                 hook("post_sampling", {"assistant_msgs": assistant_msgs})
 
-    def _execute_stop_hooks(self) -> None:
+    def _execute_stop_hooks(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"prevent_continuation": False, "blocking_errors": []}
         for hook in self._hooks:
             with contextlib.suppress(Exception):
-                hook("stop", {"turn_count": self.state.turn_count})
+                hook_result = hook("stop", {"turn_count": self.state.turn_count})
+                if isinstance(hook_result, dict):
+                    if hook_result.get("prevent_continuation"):
+                        result["prevent_continuation"] = True
+                    blocking = hook_result.get("blocking_errors")
+                    if blocking:
+                        result["blocking_errors"].extend(
+                            blocking if isinstance(blocking, list) else [blocking]
+                        )
+        return result
 
     @staticmethod
     def _parse_tool_input(raw_input: Any) -> dict[str, Any]:
@@ -800,10 +819,12 @@ def _make_user_message_dict(
 
 def _make_interruption_message() -> dict[str, Any]:
     return {
-        "type": "stream_event",
-        "data": {
-            "type": "system",
-            "subtype": "interrupted",
-            "message": "Interrupted by user",
+        "type": "user",
+        "uuid": str(uuid.uuid4()),
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": "Interrupted by user"}],
         },
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+        "is_meta": True,
     }
