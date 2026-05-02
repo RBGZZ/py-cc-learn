@@ -5,11 +5,31 @@ from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel
 
-from server.models.tools import ToolInputJSONSchema, ToolResult, ValidationResult
+from server.models.tools import ToolInputJSONSchema, ValidationResult
 
 TInput = TypeVar("TInput", bound=BaseModel)
 TOutput = TypeVar("TOutput")
 TProgress = TypeVar("TProgress")
+
+
+class ToolCallResult(BaseModel):
+    """
+    General tool result returned by Tool.call().
+    Source: Tool.ts L321-336 ToolResult<T>.
+
+    Fields match the TS type exactly:
+      - data: the tool's output data
+      - newMessages: optional messages to inject
+      - contextModifier: only honored for non-concurrency-safe tools
+      - mcpMeta: MCP protocol metadata for SDK consumers
+    """
+    data: Any = None
+    new_messages: Optional[List[Any]] = None
+    context_modifier: Optional[Any] = None
+    mcp_meta: Optional[Dict[str, Any]] = None
+
+    class Config:
+        arbitrary_types_allowed = True
 
 
 class ToolUseContext(BaseModel):
@@ -80,7 +100,7 @@ class Tool(
         can_use_tool: Any,
         parent_message: Any,
         on_progress: Any = None,
-    ) -> ToolResult:
+    ) -> ToolCallResult:
         ...
 
     @abstractmethod

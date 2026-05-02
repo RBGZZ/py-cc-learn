@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Callable, Dict, Generator, List, Optional
 
@@ -146,6 +147,16 @@ class StreamingToolExecutor:
 
         self._run_tool_use_fn: Optional[Callable] = None
 
+    def set_run_tool_use_fn(self, fn: Callable) -> None:
+        """
+        Set the function used to run individual tool uses.
+        Equivalent to the runToolUse import in StreamingToolExecutor.ts.
+        The function must be an async generator yielding dicts with
+        'message' (Message | None) and 'contextModifier' (optional).
+        Source: toolExecution.ts runToolUse.
+        """
+        self._run_tool_use_fn = fn
+
     def _run_tool_use(
         self,
         block: ToolUseBlock,
@@ -153,7 +164,7 @@ class StreamingToolExecutor:
         can_use_tool: Callable,
         tool_use_context: Any,
     ) -> Any:
-        """Hook for running tool use. Must be set before tools execute."""
+        """Hook for running tool use. Must be set via set_run_tool_use_fn before tools execute."""
         if self._run_tool_use_fn is not None:
             return self._run_tool_use_fn(
                 block, assistant_message, can_use_tool, tool_use_context
@@ -207,7 +218,12 @@ class StreamingToolExecutor:
         parsed_input = block.input
         is_concurrency_safe = False
         try:
-            is_concurrency_safe = bool(tool_definition.is_concurrency_safe(parsed_input))
+            input_schema = tool_definition.input_schema
+            if hasattr(input_schema, "model_validate"):
+                parsed = input_schema.model_validate(block.input)
+                is_concurrency_safe = bool(tool_definition.is_concurrency_safe(parsed))
+            else:
+                is_concurrency_safe = bool(tool_definition.is_concurrency_safe(parsed_input))
         except Exception:
             is_concurrency_safe = False
 
@@ -434,12 +450,14 @@ class StreamingToolExecutor:
             try:
                 this_tool_errored = False
 
+                tool_context_with_abort = copy.copy(self._tool_use_context)
+                tool_context_with_abort.abort_controller = tool_abort_controller
+
                 async for update in self._run_tool_use(
                     tool.block,
                     tool.assistant_message,
                     self._can_use_tool,
-                    self._tool_use_context,
-                    tool_abort_controller,
+                    tool_context_with_abort,
                 ):
                     abort_reason = self._get_abort_reason(tool)
                     if abort_reason is not None and not this_tool_errored:
