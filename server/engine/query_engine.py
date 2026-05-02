@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 from collections.abc import AsyncGenerator, Callable
@@ -10,6 +11,11 @@ from typing import Any
 
 from server.services.provider import Provider, StreamEvent
 from server.state.session import SessionStorage
+from server.tools.streaming import (
+    AssistantMessage,
+    StreamingToolExecutor,
+    ToolUseBlock,
+)
 
 
 class QueryExitReason(str, Enum):
@@ -23,6 +29,7 @@ class QueryExitReason(str, Enum):
     STOP_HOOK_PREVENTED = "stop_hook_prevented"
     MAX_OUTPUT_TOKENS_RECOVERIES = "max_output_tokens_max_recoveries"
     CANCELLED_BY_USER = "cancelled_by_user"
+    PROMPT_TOO_LONG = "prompt_too_long"
 
 
 class ContinueReason(str, Enum):
@@ -41,6 +48,25 @@ AUTO_COMPACT_TOKEN_THRESHOLD = 180_000
 TOKEN_BUDGET_RATIO = 0.9
 DIMINISHING_RETURNS_DELTA_THRESHOLD = 500
 DIMINISHING_RETURNS_CONSECUTIVE = 3
+ESCALATED_MAX_TOKENS = 64000
+
+
+class DynamicAbortController:
+    def __init__(self, event: asyncio.Event, reason: str | None = None):
+        self._event = event
+        self._reason = reason
+
+    @property
+    def aborted(self) -> bool:
+        return self._event.is_set()
+
+    @property
+    def signal(self) -> asyncio.Event:
+        return self._event
+
+    @property
+    def reason(self) -> str | None:
+        return self._reason
 
 
 @dataclass
@@ -54,6 +80,7 @@ class QueryEngineConfig:
     session_storage: SessionStorage | None = None
     abort_signal: asyncio.Event | None = None
     on_stream_event: Callable[[StreamEvent], Any] | None = None
+    is_auto_compact_enabled: bool = True
 
 
 @dataclass
@@ -71,6 +98,7 @@ class QueryState:
             "cache_read_input_tokens": 0,
         }
     )
+    _compact_boundary_index: int = 0
 
 
 class QueryEngine:
@@ -132,7 +160,6 @@ class QueryEngine:
             "tools": [t.name for t in self._tools if hasattr(t, "name")],
         }
 
-        assistant_blocks: list[dict[str, Any]] = []
         stop_reason: str | None = None
 
         async for event in self._query_loop():
@@ -175,8 +202,13 @@ class QueryEngine:
                 return
 
             elif event_type == "exit":
-                stop_reason = event.get("data", {}).get("reason", QueryExitReason.COMPLETED.value)
+                stop_reason = event.get("data", {}).get(
+                    "reason", QueryExitReason.COMPLETED.value
+                )
                 break
+
+            elif event_type == "tool_result":
+                yield event
 
         yield {
             "type": "result",
@@ -191,7 +223,10 @@ class QueryEngine:
     async def _query_loop(self) -> AsyncGenerator[dict[str, Any], None]:
         while self.state.turn_count < self.config.max_turns:
             if self._abort.is_set():
-                yield {"type": "exit", "data": {"reason": QueryExitReason.ABORTED_STREAMING.value}}
+                yield {
+                    "type": "exit",
+                    "data": {"reason": QueryExitReason.ABORTED_STREAMING.value},
+                }
                 return
 
             if self.state.turn_count > 0:
@@ -199,6 +234,12 @@ class QueryEngine:
                 if compact_result:
                     yield {"type": "exit", "data": {"reason": compact_result}}
                     return
+
+            yield {"type": "stream_request_start", "data": {}}
+
+            assistant_msgs: list[dict[str, Any]] = []
+            tool_use_blocks: list[dict[str, Any]] = []
+            needs_follow_up = False
 
             try:
                 async for event in self._call_model():
@@ -209,15 +250,13 @@ class QueryEngine:
 
                     if event_type == "assistant":
                         msg = event.get("data", event)
+                        self._update_usage_from_msg(msg)
+                        assistant_msgs.append(msg)
+
                         if self._has_tool_use(msg):
-                            async for tool_event in self._execute_tools(msg):
-                                yield tool_event
-                        else:
-                            yield {
-                                "type": "exit",
-                                "data": {"reason": QueryExitReason.COMPLETED.value},
-                            }
-                            return
+                            needs_follow_up = True
+                            tb = self._extract_tool_blocks(msg)
+                            tool_use_blocks.extend(tb)
 
                     if event_type == "error":
                         yield {
@@ -227,11 +266,65 @@ class QueryEngine:
                         return
 
             except asyncio.CancelledError:
-                yield {"type": "exit", "data": {"reason": QueryExitReason.CANCELLED_BY_USER.value}}
+                yield {
+                    "type": "exit",
+                    "data": {"reason": QueryExitReason.CANCELLED_BY_USER.value},
+                }
                 return
-            except Exception:
-                yield {"type": "error", "data": {"message": "Model invocation failed"}}
-                yield {"type": "exit", "data": {"reason": QueryExitReason.MODEL_ERROR.value}}
+            except Exception as exc:
+                if not needs_follow_up and self.config.fallback_model:
+                    yield {
+                        "type": "stream_event",
+                        "data": {
+                            "type": "system",
+                            "subtype": "model_fallback",
+                            "fallback_model": self.config.fallback_model,
+                        },
+                    }
+                    needs_follow_up = True
+                else:
+                    yield {"type": "error", "data": {"message": f"Model invocation failed: {exc}"}}
+                    yield {"type": "exit", "data": {"reason": QueryExitReason.MODEL_ERROR.value}}
+                    return
+
+            if self._abort.is_set():
+                if tool_use_blocks:
+                    async for tool_event in self._execute_tools_streaming_multi(
+                        assistant_msgs, tool_use_blocks
+                    ):
+                        yield tool_event
+                yield {
+                    "type": "exit",
+                    "data": {"reason": QueryExitReason.ABORTED_STREAMING.value},
+                }
+                return
+
+            if needs_follow_up and tool_use_blocks:
+                async for tool_event in self._execute_tools_streaming_multi(
+                    assistant_msgs, tool_use_blocks
+                ):
+                    yield tool_event
+
+            if not needs_follow_up:
+                self._check_token_budget_on_state()
+                if self._is_max_output_tokens_from_msgs(assistant_msgs):
+                    handled = self._handle_max_output_tokens_recovery()
+                    if handled:
+                        needs_follow_up = True
+                    else:
+                        yield {
+                            "type": "exit",
+                            "data": {
+                                "reason": QueryExitReason.MAX_OUTPUT_TOKENS_RECOVERIES.value,
+                            },
+                        }
+                        return
+
+            if not needs_follow_up:
+                yield {
+                    "type": "exit",
+                    "data": {"reason": QueryExitReason.COMPLETED.value},
+                }
                 return
 
             self.state.turn_count += 1
@@ -251,6 +344,11 @@ class QueryEngine:
 
         messages_for_api = self._build_messages_for_api()
         tool_schemas = self._build_tool_schemas()
+        max_tokens = (
+            self.state.max_output_tokens_override
+            or getattr(self.config.provider.config, "max_tokens", 4096)
+        )
+        self.config.provider.config.max_tokens = max_tokens
 
         async for event in self.config.provider.stream_chat(
             messages=messages_for_api,
@@ -261,11 +359,44 @@ class QueryEngine:
 
     def _build_messages_for_api(self) -> list[dict[str, Any]]:
         api_messages: list[dict[str, Any]] = []
-        for msg in self.state.messages:
+        start_idx = self.state._compact_boundary_index
+        for msg in self.state.messages[start_idx:]:
+            if msg.get("is_meta"):
+                continue
+            if msg.get("is_virtual"):
+                continue
             msg_type = msg.get("type", "")
             if msg_type in ("user", "assistant"):
-                api_messages.append(msg)
+                api_messages.append(self._normalize_api_message(msg))
         return api_messages
+
+    @staticmethod
+    def _normalize_api_message(msg: dict[str, Any]) -> dict[str, Any]:
+        msg_data = msg.get("message", msg)
+        content = msg_data.get("content", [])
+        if not isinstance(content, list):
+            return msg
+        cleaned: list[dict[str, Any]] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type", "")
+            if block_type == "text":
+                cleaned.append(block)
+            elif block_type == "tool_use":
+                cleaned.append(block)
+            elif block_type == "tool_result":
+                cleaned.append(block)
+            elif block_type == "thinking":
+                cleaned.append(block)
+        if not cleaned:
+            cleaned.append({"type": "text", "text": ""})
+        result = dict(msg)
+        result["message"] = {
+            **msg_data,
+            "content": cleaned,
+        }
+        return result
 
     def _build_tool_schemas(self) -> list[dict[str, Any]]:
         schemas: list[dict[str, Any]] = []
@@ -291,79 +422,204 @@ class QueryEngine:
         content = msg_data.get("content", [])
         if isinstance(content, list):
             return any(
-                block.get("type") == "tool_use" for block in content if isinstance(block, dict)
+                block.get("type") == "tool_use"
+                for block in content
+                if isinstance(block, dict)
             )
         return False
 
-    async def _execute_tools(
-        self, assistant_msg: dict[str, Any]
-    ) -> AsyncGenerator[dict[str, Any], None]:
-        msg_data = assistant_msg.get("message", assistant_msg)
+    @staticmethod
+    def _extract_tool_blocks(msg: dict[str, Any]) -> list[dict[str, Any]]:
+        msg_data = msg.get("message", msg)
         content = msg_data.get("content", [])
+        if not isinstance(content, list):
+            return []
+        return [b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"]
 
-        tool_blocks = [
-            block
-            for block in content
-            if isinstance(block, dict) and block.get("type") == "tool_use"
-        ]
+    @staticmethod
+    def _is_max_output_tokens_from_msgs(assistant_msgs: list[dict[str, Any]]) -> bool:
+        for msg in assistant_msgs:
+            msg_data = msg.get("message", msg)
+            stop_reason = msg_data.get("stop_reason", "")
+            if stop_reason in ("max_tokens", "length"):
+                return True
+        return False
 
-        for block in tool_blocks:
-            tool_name = block.get("name", "")
-            tool_input: dict[str, Any] = block.get("input", {})
-            if isinstance(tool_input, str):
-                import json
+    def _handle_max_output_tokens_recovery(self) -> bool:
+        if self.state.max_output_tokens_recovery_count >= MAX_OUTPUT_TOKENS_RECOVERY_LIMIT:
+            return False
 
-                try:
-                    tool_input = json.loads(tool_input)
-                except json.JSONDecodeError:
-                    tool_input = {}
+        if (
+            self.state.max_output_tokens_override is None
+            and self.state.max_output_tokens_recovery_count == 0
+        ):
+            self.state.max_output_tokens_override = ESCALATED_MAX_TOKENS
+            self.state.max_output_tokens_recovery_count = 1
+            return True
 
-            tool = self._tool_map.get(tool_name)
+        self.state.max_output_tokens_recovery_count += 1
+        recovery_msg: dict[str, Any] = {
+            "type": "user",
+            "uuid": str(uuid.uuid4()),
+            "message": {
+                "role": "user",
+                "content": (
+                    "Output token limit hit. Resume directly — no apology, "
+                    "no recap of what you were doing. Pick up mid-thought if "
+                    "that is where the cut happened. Break remaining work "
+                    "into smaller pieces."
+                ),
+            },
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+            "is_meta": True,
+        }
+        self.state.messages.append(recovery_msg)
+        return True
+
+    async def _execute_tools_streaming_multi(
+        self, assistant_msgs: list[dict[str, Any]], tool_blocks: list[dict[str, Any]]
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        abort_controller = DynamicAbortController(self._abort)
+
+        tool_use_context = type(
+            "ToolUseContext",
+            (),
+            {
+                "options": type("Options", (), {"tools": self._tools})(),
+                "abort_controller": abort_controller,
+                "get_app_state": lambda: None,
+                "set_app_state": lambda f: None,
+            },
+        )()
+
+        def _can_use_tool(*args: Any, **kwargs: Any) -> dict[str, str]:
+            return {"behavior": "allow"}
+
+        can_use_tool = _can_use_tool
+
+        executor = StreamingToolExecutor(
+            tool_definitions=self._tools,
+            can_use_tool=can_use_tool,
+            tool_use_context=tool_use_context,
+        )
+
+        async def _run_single_tool(
+            block: ToolUseBlock,
+            assistant_msg_obj: AssistantMessage,
+            can_use: Callable,
+            ctx: Any,
+        ) -> AsyncGenerator[dict[str, Any], None]:
+            tool = self._tool_map.get(block.name)
             if tool is None:
+                error_block = _make_tool_result_block(
+                    block.id, f"Tool '{block.name}' not found", is_error=True
+                )
                 yield {
-                    "type": "tool_result",
-                    "data": {
-                        "tool_use_id": block.get("id", ""),
-                        "content": f"Tool '{tool_name}' not found",
-                        "is_error": True,
-                    },
+                    "message": _make_user_message_dict(
+                        [error_block],
+                        f"Error: Tool '{block.name}' not found",
+                        assistant_msg_obj.uuid,
+                    ),
                 }
-                continue
+                return
 
             try:
-                result = await tool.call(tool_input, None)
-                result_block: dict[str, Any] = {
-                    "type": "tool_result",
-                    "tool_use_id": block.get("id", ""),
-                    "content": str(result) if not isinstance(result, dict) else result,
-                    "is_error": False,
+                result = await tool.call(block.input, ctx)
+                if isinstance(result, dict):
+                    content_str = json.dumps(result, default=str)
+                else:
+                    content_str = str(result)
+                result_block = _make_tool_result_block(block.id, content_str)
+                yield {
+                    "message": _make_user_message_dict(
+                        [result_block],
+                        content_str[:500],
+                        assistant_msg_obj.uuid,
+                    ),
                 }
-                user_result_msg: dict[str, Any] = {
-                    "type": "user",
-                    "uuid": str(uuid.uuid4()),
-                    "message": {"role": "user", "content": [result_block]},
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
-                }
-                self.state.messages.append(user_result_msg)
-                yield {"type": "tool_result", "data": result_block}
-
             except Exception as exc:
-                error_block: dict[str, Any] = {
-                    "type": "tool_result",
-                    "tool_use_id": block.get("id", ""),
-                    "content": str(exc),
-                    "is_error": True,
+                error_block = _make_tool_result_block(block.id, str(exc), is_error=True)
+                yield {
+                    "message": _make_user_message_dict(
+                        [error_block],
+                        str(exc)[:500],
+                        assistant_msg_obj.uuid,
+                    ),
                 }
-                user_error_msg: dict[str, Any] = {
-                    "type": "user",
-                    "uuid": str(uuid.uuid4()),
-                    "message": {"role": "user", "content": [error_block]},
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
-                }
-                self.state.messages.append(user_error_msg)
-                yield {"type": "tool_result", "data": error_block}
+
+        executor.set_run_tool_use_fn(_run_single_tool)
+
+        for tool_block in tool_blocks:
+            msg_uuid = str(uuid.uuid4())
+            assistant_msg_obj = AssistantMessage(uuid=msg_uuid)
+            executor.add_tool(
+                ToolUseBlock(
+                    id=tool_block.get("id", ""),
+                    name=tool_block.get("name", ""),
+                    input=self._parse_tool_input(tool_block.get("input", {})),
+                ),
+                assistant_msg_obj,
+            )
+
+        async for update in executor.get_remaining_results():
+            msg = update.get("message")
+            if msg is not None:
+                msg_type = msg.get("type") if isinstance(msg, dict) else getattr(msg, "type", None)
+
+                if msg_type == "user":
+                    msg_inner = (
+                        msg.get("message")
+                        if isinstance(msg, dict)
+                        else getattr(msg, "message", None)
+                    )
+
+                    if msg_inner is not None:
+                        inner_content = (
+                            msg_inner.get("content")
+                            if isinstance(msg_inner, dict)
+                            else getattr(msg_inner, "content", None)
+                        )
+                        if inner_content is not None:
+                            user_result_msg: dict[str, Any] = {
+                                "type": "user",
+                                "uuid": str(uuid.uuid4()),
+                                "message": {
+                                    "role": "user",
+                                    "content": inner_content,
+                                },
+                                "timestamp": time.strftime(
+                                    "%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()
+                                ),
+                            }
+                            self.state.messages.append(user_result_msg)
+
+                            if isinstance(inner_content, list):
+                                for result_block in inner_content:
+                                    yield {
+                                        "type": "tool_result",
+                                        "data": result_block,
+                                    }
+                            elif isinstance(inner_content, dict):
+                                yield {
+                                    "type": "tool_result",
+                                    "data": inner_content,
+                                }
+
+    @staticmethod
+    def _parse_tool_input(raw_input: Any) -> dict[str, Any]:
+        if isinstance(raw_input, dict):
+            return raw_input
+        if isinstance(raw_input, str):
+            try:
+                return json.loads(raw_input)
+            except json.JSONDecodeError:
+                return {}
+        return {}
 
     def _check_auto_compact(self) -> str | None:
+        if not self.config.is_auto_compact_enabled:
+            return None
+
         estimated_tokens = self._compute_estimated_tokens()
 
         if estimated_tokens >= AUTO_COMPACT_TOKEN_THRESHOLD:
@@ -372,10 +628,28 @@ class QueryEngine:
         return None
 
     def _compute_estimated_tokens(self) -> int:
-        estimated_tokens = sum(
-            len(str(msg.get("message", msg.get("content", "")))) for msg in self.state.messages
-        )
-        return int(estimated_tokens / 4)
+        usage = self.state.total_usage
+        api_estimate = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+        if api_estimate > 0:
+            return api_estimate
+
+        total_chars = 0
+        for msg in self.state.messages:
+            msg_data = msg.get("message", msg)
+            content = msg_data.get("content", "")
+            if isinstance(content, str):
+                total_chars += len(content)
+            elif isinstance(content, list):
+                total_chars += sum(
+                    len(str(block.get("text", block.get("content", ""))))
+                    for block in content
+                    if isinstance(block, dict)
+                )
+        return max(1, int(total_chars * 0.25))
+
+    def _check_token_budget_on_state(self) -> bool:
+        usage = self.state.total_usage
+        return self._check_token_budget(usage)
 
     def _check_token_budget(self, usage: dict[str, Any]) -> bool:
         total_context = usage.get("input_tokens", 0)
@@ -413,3 +687,31 @@ class QueryEngine:
             ]
         if usage.get("cache_read_input_tokens"):
             self.state.total_usage["cache_read_input_tokens"] += usage["cache_read_input_tokens"]
+
+    def _update_usage_from_msg(self, msg: dict[str, Any]) -> None:
+        msg_data = msg.get("message", msg)
+        usage = msg_data.get("usage", {})
+        if usage:
+            self._update_usage(usage)
+
+
+def _make_tool_result_block(
+    tool_use_id: str, content: str, is_error: bool = False
+) -> dict[str, Any]:
+    return {
+        "type": "tool_result",
+        "tool_use_id": tool_use_id,
+        "content": content,
+        "is_error": is_error,
+    }
+
+
+def _make_user_message_dict(
+    content: list[dict[str, Any]], tool_use_result: str, source_uuid: str
+) -> dict[str, Any]:
+    return {
+        "type": "user",
+        "message": {"type": "user", "content": content},
+        "tool_use_result": tool_use_result,
+        "source_tool_assistant_uuid": source_uuid,
+    }
