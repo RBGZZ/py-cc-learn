@@ -1,0 +1,12 @@
+* text=auto
+
+*.py eol=lf
+*.ts eol=lf
+*.vue eol=lf
+*.sh eol=lf
+*.json eol=lf
+*.toml eol=lf
+*.yaml eol=lf
+*.yml eol=lf
+*.md eol=lf
+*.jsonl binary
