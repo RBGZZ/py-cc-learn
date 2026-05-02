@@ -1,8 +1,19 @@
-# py-cc-learn
+# py-cc-learn &nbsp;`v0.1.1-pre`
 
-> **AI 编程助手** — Claude Code 架构的 Python 重写
+> **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; ⚠️ 预发布版本，仍在积极开发中
 
 基于 [Claude Code Haha](https://github.com/anthropics/claude-code) 源码，使用 **Python 3.12+** (FastAPI) + **Vue 3** (Vite) 完整重写，支持多厂商模型后端。
+
+---
+
+## 🏷️ 版本状态
+
+| 版本 | 状态 | 说明 |
+|------|------|------|
+| `v0.1.1-pre` | 🟡 预发布 | 核心功能完成，性能调优中 |
+| 目标 `v0.2.0` | ⬜ 计划中 | 上下文压缩管线 + 完整恢复机制 |
+
+**当前仍在积极开发中，不保证 API 稳定性。**
 
 ---
 
@@ -118,7 +129,7 @@ py-cc-learn/
 │   ├── nginx.conf             # 反向代理
 │   ├── docker-compose.yml     # 容器编排
 │   └── README.md              # 部署指南
-├── tests/                     # 245 单元/集成/E2E 测试
+├── tests/                     # 228 单元/集成/E2E 测试
 ├── .trae/specs/python-rewrite/ # 技术规格文档
 └── .github/workflows/         # CI 跨平台矩阵
 ```
@@ -139,10 +150,10 @@ py-cc-learn/
 | Phase 7 | 子 Agent + 扩展工具 | ✅ |
 | Phase 8 | Vue 3 Web 前端 | ✅ |
 | Phase 9 | FastAPI 路由 + CLI + Git + 图像 + LSP + MCP | ✅ |
-| Phase 10 | 测试 (245 tests) + CI | ✅ |
+| Phase 10 | 测试 (228 tests) + CI | ✅ |
 | Phase 11 | 部署 + 验收 | ✅ |
 
-**49/49 Task 完成 · 293/293 Checklist 通过 · 217 tests passed · v1.0**
+**49/49 Task 完成 · 293/293 Checklist 通过 · 228 tests passed · v0.1.1-pre**
 
 ---
 
