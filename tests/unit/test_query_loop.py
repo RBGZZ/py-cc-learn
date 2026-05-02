@@ -15,6 +15,7 @@ from server.engine.query_engine import (
     QueryEngineConfig,
     QueryExitReason,
     QueryState,
+    _make_interruption_message,
 )
 from server.services.provider import StreamEvent
 
@@ -354,3 +355,116 @@ def _make_fake_tool(name: str, delay: float, concurrency_safe: bool):
             return self._cs
 
     return FakeTool()
+
+
+class TestYieldMissingToolResults:
+    def test_generates_synthetic_results(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        assistant_msgs = [
+            {
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "name": "Read", "id": "t1", "input": {}},
+                        {"type": "tool_use", "name": "Bash", "id": "t2", "input": {}},
+                    ]
+                }
+            }
+        ]
+        assert len(engine.state.messages) == 0
+        engine._yield_missing_tool_results(assistant_msgs, "Test error", None)
+        assert len(engine.state.messages) == 2
+        for msg in engine.state.messages:
+            content = msg["message"]["content"]
+            assert len(content) == 1
+            assert content[0]["is_error"] is True
+            assert "Test error" in content[0]["content"]
+
+    def test_no_tool_blocks_does_nothing(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        assistant_msgs = [
+            {"message": {"content": [{"type": "text", "text": "hello"}]}}
+        ]
+        engine._yield_missing_tool_results(assistant_msgs, "Test", None)
+        assert len(engine.state.messages) == 0
+
+
+class TestInterruptionMessage:
+    def test_interruption_message_format(self):
+        msg = _make_interruption_message()
+        assert msg["type"] == "stream_event"
+        assert msg["data"]["type"] == "system"
+        assert msg["data"]["subtype"] == "interrupted"
+        assert "Interrupted" in msg["data"]["message"]
+
+
+class TestNormalizeMessages:
+    def test_merge_consecutive_user_messages(self):
+        msgs = [
+            {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "a"}]}},
+            {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "b"}]}},
+            {"type": "assistant", "message": {"role": "assistant", "content": "x"}},
+            {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "c"}]}},
+        ]
+        merged = QueryEngine._merge_consecutive_user_messages(msgs)
+        assert len(merged) == 3
+        assert len(merged[0]["message"]["content"]) == 2
+        assert merged[1]["type"] == "assistant"
+        assert merged[2]["type"] == "user"
+
+    def test_no_consecutive_users_no_change(self):
+        msgs = [
+            {"type": "user", "message": {"role": "user", "content": "a"}},
+            {"type": "assistant", "message": {"role": "assistant", "content": "b"}},
+        ]
+        merged = QueryEngine._merge_consecutive_user_messages(msgs)
+        assert len(merged) == 2
+
+
+class TestHooks:
+    def test_register_and_execute_post_sampling(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        calls: list = []
+        engine.register_hook(lambda ev, data: calls.append((ev, data)))
+        engine._execute_post_sampling_hooks([{"test": True}])
+        assert len(calls) == 1
+        assert calls[0][0] == "post_sampling"
+
+    def test_register_and_execute_stop_hooks(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        calls: list = []
+        engine.register_hook(lambda ev, data: calls.append((ev, data)))
+        engine._execute_stop_hooks()
+        assert len(calls) == 1
+        assert calls[0][0] == "stop"
+
+    def test_hook_exception_is_suppressed(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        engine.register_hook(lambda ev, data: (_ for _ in ()).throw(Exception("boom")))
+        engine._execute_stop_hooks()
+
+
+class TestStreamingExecutorIntegration:
+    @pytest.mark.asyncio
+    async def test_executor_created_before_streaming(self):
+        abort = asyncio.Event()
+        provider = FakeProvider([
+            assistant_event([
+                {"type": "tool_use", "name": "Read", "input": {"file_path": "/f1"}, "id": "t1"},
+                {"type": "tool_use", "name": "Glob", "input": {"pattern": "*.py"}, "id": "t2"},
+            ]),
+        ])
+
+        engine = QueryEngine(QueryEngineConfig(
+            provider=provider,
+            tools=[_make_fake_tool("Read", 0.02, True), _make_fake_tool("Glob", 0.02, True)],
+            system_prompt="test",
+            max_turns=1,
+            abort_signal=abort,
+        ))
+
+        events = []
+        async for event in engine.submit_message("test"):
+            events.append(event)
+
+        tool_results = [e for e in events if e.get("type") == "tool_result"]
+        assert len(tool_results) >= 1
