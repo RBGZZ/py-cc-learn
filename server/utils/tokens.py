@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import json
 from typing import Any, Dict, List, Optional
 
 import tiktoken
@@ -60,6 +61,33 @@ def get_token_usage(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if message["message"].get("model") == SYNTHETIC_MODEL:
         return None
     return message["message"]["usage"]
+
+
+def _get_assistant_message_id(message: Dict[str, Any]) -> Optional[str]:
+    if message.get("type") != "assistant":
+        return None
+    if "id" not in message.get("message", {}):
+        return None
+    if message["message"].get("model") == SYNTHETIC_MODEL:
+        return None
+    return message["message"]["id"]
+
+
+def get_assistant_message_content_length(message: Dict[str, Any]) -> int:
+    content_length = 0
+    for block in message.get("message", {}).get("content", []):
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type == "text":
+            content_length += len(block.get("text", ""))
+        elif block_type == "thinking":
+            content_length += len(block.get("thinking", ""))
+        elif block_type == "redacted_thinking":
+            content_length += len(block.get("data", ""))
+        elif block_type == "tool_use":
+            content_length += len(json.dumps(block.get("input", {})))
+    return content_length
 
 
 def get_token_count_from_usage(usage: Dict[str, Any]) -> int:

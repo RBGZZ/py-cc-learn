@@ -192,8 +192,3 @@ def save_api_key(vendor: str, api_key: str) -> None:
 
 def remove_api_key(vendor: str) -> None:
     get_api_key_store().delete(vendor)
-
-
-def reset_api_key_store_for_testing() -> None:
-    global _api_key_store
-    _api_key_store = None

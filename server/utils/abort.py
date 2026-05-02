@@ -51,13 +51,12 @@ def create_child_abort_controller(
         return child
 
     _weak_child = weakref.ref(child)
-    _weak_parent = weakref.ref(parent)
 
     async def _propagate_abort() -> None:
-        p = _weak_parent()
+        await parent._event.wait()
         c = _weak_child()
-        if p is not None and c is not None:
-            c.abort(p.reason)
+        if c is not None and not c._event.is_set():
+            c.abort(parent.reason)
 
     _propagation_task = asyncio.create_task(_propagate_abort())
 

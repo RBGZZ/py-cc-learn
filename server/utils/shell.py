@@ -8,13 +8,13 @@ import shlex
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from server.utils.abort import AbortController, force_kill_process
 from server.utils.log import log_error, log_for_debugging
-from server.utils.platform import get_platform, is_windows
+from server.utils.platform import is_windows
 
 
 class ShellType(str, Enum):
@@ -62,6 +62,12 @@ def create_failed_result(error_message: str) -> ShellResult:
     )
 
 
+@dataclass
+class BuildExecResult:
+    command_string: str
+    cwd_file_path: str
+
+
 class ShellProvider(ABC):
     @property
     @abstractmethod
@@ -71,12 +77,22 @@ class ShellProvider(ABC):
     @abstractmethod
     def shell_path(self) -> str: ...
 
+    @property
     @abstractmethod
-    def build_exec_command(
-        self, command: str, working_dir: Optional[str] = None
-    ) -> List[str]: ...
+    def detached(self) -> bool: ...
 
-    def get_environment_overrides(self, command: str) -> Dict[str, str]:
+    @abstractmethod
+    async def build_exec_command(
+        self,
+        command: str,
+        cmd_id: str,
+        working_dir: Optional[str] = None,
+    ) -> BuildExecResult: ...
+
+    @abstractmethod
+    def get_spawn_args(self, command_string: str) -> List[str]: ...
+
+    async def get_environment_overrides(self, command: str) -> Dict[str, str]:
         return {}
 
 
@@ -92,31 +108,35 @@ class BashShellProvider(ShellProvider):
     def shell_path(self) -> str:
         return self._shell_path
 
-    def build_exec_command(
-        self, command: str, working_dir: Optional[str] = None
-    ) -> List[str]:
-        cwd_tracker = self._build_cwd_tracker()
-        full_command = f"{cwd_tracker}\n{command}"
-        return [self._shell_path, "-c", full_command]
+    @property
+    def detached(self) -> bool:
+        return False
 
-    @staticmethod
-    def _build_cwd_tracker() -> str:
+    async def build_exec_command(
+        self,
+        command: str,
+        cmd_id: str,
+        working_dir: Optional[str] = None,
+    ) -> BuildExecResult:
+        cwd_file_path = _create_temp_tracker()
         if is_windows():
-            tracker_path = _create_temp_tracker()
-            return f"pwd -P >| {tracker_path}"
+            cwd_tracker = f"pwd -P >| {cwd_file_path}"
         else:
-            tracker_path = _create_temp_tracker()
-            return f"pwd -P >| {shlex.quote(tracker_path)}"
+            cwd_tracker = f"pwd -P >| {shlex.quote(cwd_file_path)}"
+        full_command = f"{cwd_tracker}\n{command}"
+        return BuildExecResult(
+            command_string=full_command,
+            cwd_file_path=cwd_file_path,
+        )
 
-    def get_environment_overrides(self, command: str) -> Dict[str, str]:
+    def get_spawn_args(self, command_string: str) -> List[str]:
+        return [self._shell_path, "-c", command_string]
+
+    async def get_environment_overrides(self, command: str) -> Dict[str, str]:
         overrides: Dict[str, str] = {}
         if is_windows():
             overrides["HOME"] = os.environ.get("USERPROFILE", os.path.expanduser("~"))
         return overrides
-
-    @property
-    def detached(self) -> bool:
-        return False
 
 
 class PowerShellShellProvider(ShellProvider):
@@ -131,23 +151,36 @@ class PowerShellShellProvider(ShellProvider):
     def shell_path(self) -> str:
         return self._shell_path
 
-    def build_exec_command(
-        self, command: str, working_dir: Optional[str] = None
-    ) -> List[str]:
+    @property
+    def detached(self) -> bool:
+        return False
+
+    async def build_exec_command(
+        self,
+        command: str,
+        cmd_id: str,
+        working_dir: Optional[str] = None,
+    ) -> BuildExecResult:
         import base64
 
+        cwd_file_path = _create_temp_tracker()
         encoded = base64.b64encode(command.encode("utf-16-le")).decode("ascii")
+        return BuildExecResult(
+            command_string=encoded,
+            cwd_file_path=cwd_file_path,
+        )
+
+    def get_spawn_args(self, command_string: str) -> List[str]:
         return [
             self._shell_path,
             "-NoProfile",
             "-NonInteractive",
             "-EncodedCommand",
-            encoded,
+            command_string,
         ]
 
-    @property
-    def detached(self) -> bool:
-        return False
+    async def get_environment_overrides(self, command: str) -> Dict[str, str]:
+        return {}
 
 
 def _create_temp_tracker() -> str:
@@ -180,6 +213,9 @@ async def find_suitable_shell() -> str:
     )
     prefer_bash = "bash" in env_shell
 
+    zsh_path = await asyncio.to_thread(shutil.which, "zsh")
+    bash_path = await asyncio.to_thread(shutil.which, "bash")
+
     shell_paths = ["/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"]
     shell_order = ["bash", "zsh"] if prefer_bash else ["zsh", "bash"]
 
@@ -188,11 +224,25 @@ async def find_suitable_shell() -> str:
     if is_env_shell_supported and _is_executable(env_shell):
         candidate_shells.append(env_shell)
 
+    if prefer_bash:
+        if bash_path:
+            candidate_shells.append(bash_path)
+    else:
+        if zsh_path:
+            candidate_shells.append(zsh_path)
+
     for shell_name in shell_order:
         for base_path in shell_paths:
-            shell_path = os.path.join(base_path, shell_name)
-            if shell_path not in candidate_shells:
-                candidate_shells.append(shell_path)
+            shell_candidate = os.path.join(base_path, shell_name)
+            if shell_candidate not in candidate_shells:
+                candidate_shells.append(shell_candidate)
+
+    if not prefer_bash:
+        if bash_path and bash_path not in candidate_shells:
+            candidate_shells.append(bash_path)
+    else:
+        if zsh_path and zsh_path not in candidate_shells:
+            candidate_shells.append(zsh_path)
 
     if is_windows():
         for git_bash in [
@@ -202,9 +252,9 @@ async def find_suitable_shell() -> str:
             if git_bash not in candidate_shells:
                 candidate_shells.append(git_bash)
 
-    for shell_path in candidate_shells:
-        if shell_path and _is_executable(shell_path):
-            return shell_path
+    for shell_candidate in candidate_shells:
+        if shell_candidate and _is_executable(shell_candidate):
+            return shell_candidate
 
     error_msg = (
         "No suitable shell found. Claude CLI requires a Posix shell environment. "
@@ -225,14 +275,19 @@ class ShellConfig:
         self.provider = provider
 
 
-@functools.lru_cache(maxsize=1)
-def _get_cached_shell_config() -> asyncio.Future:
-    loop = asyncio.get_event_loop()
-    return loop.create_task(_get_shell_config_impl())
+_shell_config_cache: Optional[ShellConfig] = None
 
 
 async def get_shell_config() -> ShellConfig:
-    return await _get_cached_shell_config()
+    global _shell_config_cache
+    if _shell_config_cache is None:
+        _shell_config_cache = await _get_shell_config_impl()
+    return _shell_config_cache
+
+
+def _reset_shell_config_cache() -> None:
+    global _shell_config_cache
+    _shell_config_cache = None
 
 
 async def find_powershell_path() -> Optional[str]:
@@ -252,17 +307,11 @@ async def find_powershell_path() -> Optional[str]:
     return None
 
 
-async def get_ps_provider() -> ShellProvider:
+async def get_ps_provider() -> PowerShellShellProvider:
     ps_path = await find_powershell_path()
     if not ps_path:
         raise RuntimeError("PowerShell is not available")
     return PowerShellShellProvider(ps_path)
-
-
-_SHELL_RESOLVER: Dict[ShellType, Callable[[], Any]] = {
-    "bash": lambda: get_shell_config().then(lambda c: c.provider),
-    "powershell": lambda: get_ps_provider(),
-}
 
 
 class ExecOptions:
@@ -291,6 +340,7 @@ async def exec_command(
         options = ExecOptions()
 
     cmd_timeout = options.timeout or DEFAULT_TIMEOUT_SECONDS
+    cmd_id = format(random.randint(0, 0xFFFF), "04x")
 
     if shell_type == ShellType.BASH:
         config = await get_shell_config()
@@ -298,20 +348,23 @@ async def exec_command(
     elif shell_type == ShellType.POWERSHELL:
         provider = await get_ps_provider()
     else:
-        provider = (await get_shell_config()).provider
+        config = await get_shell_config()
+        provider = config.provider
 
-    cmd_id = format(random.randint(0, 0xFFFF), "04x")
     cwd = os.getcwd()
 
     if abort_signal.aborted:
         return create_aborted_result(abort_signal.reason)
 
-    shell_args = provider.build_exec_command(command, working_dir=cwd)
-    env_overrides = provider.get_environment_overrides(command)
+    build_result = await provider.build_exec_command(command, cmd_id)
+    command_string = build_result.command_string
+    shell_args = provider.get_spawn_args(command_string)
+    env_overrides = await provider.get_environment_overrides(command)
 
     try:
         process = await asyncio.create_subprocess_exec(
-            *shell_args,
+            shell_args[0],
+            *shell_args[1:],
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
@@ -367,9 +420,7 @@ async def exec_command(
         abort_task = asyncio.create_task(_abort_handler())
 
         try:
-            exit_code = await asyncio.wait_for(
-                wait_task, timeout=cmd_timeout
-            )
+            exit_code = await asyncio.wait_for(wait_task, timeout=cmd_timeout)
         except asyncio.TimeoutError:
             await force_kill_process(process)
             exit_code = -1
