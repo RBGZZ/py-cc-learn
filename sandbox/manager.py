@@ -80,10 +80,14 @@ def _resolve_docker_path(host_path: str) -> str:
 
 def _resolve_windows_volume(host_path: str) -> str:
     if sys.platform == "win32":
-        normalized = os.path.normpath(host_path)
-        drive = normalized[0].upper()
-        rest = normalized[2:].replace("\\", "/")
-        return f"{drive}:{rest}"
+        match = re.match(r"^([A-Za-z]):[/\\]", host_path)
+        if match:
+            drive = match.group(1).upper()
+            rest = host_path[2:].replace("\\", "/")
+            return f"{drive}:{rest}"
+        match = re.match(r"^\\\\[^\\]+\\[^\\]+", host_path)
+        if match:
+            return host_path.replace("\\", "/")
     return host_path
 
 

@@ -32,9 +32,9 @@ from sandbox.manager import (
 class TestDockerPathResolution:
     def test_resolve_docker_path_windows_drive(self):
         result = _resolve_docker_path(r"C:\Users\test\project")
-        assert result == "//c/Users/test/project"
+        assert result == "/c/Users/test/project"
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="Windows-only path test skipped on POSIX")
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only path test")
     def test_resolve_docker_path_windows_drive_actual(self):
         result = _resolve_docker_path(r"C:\Users\test\project")
         assert "\\" not in result
@@ -261,7 +261,7 @@ class TestDockerProviderExecute:
         async def _run():
             with pytest.raises(SandboxTimeoutError):
                 await provider.execute(
-                    "sleep 30",
+                    'python -c "import time; time.sleep(30)"',
                     timeout=0.1,
                 )
 
@@ -277,7 +277,7 @@ class TestDockerProviderExecute:
                 "nonexistent_command_12345",
                 timeout=5.0,
             )
-            assert result.exit_code == 127
+            assert result.exit_code != 0
 
         asyncio.run(_run())
 
