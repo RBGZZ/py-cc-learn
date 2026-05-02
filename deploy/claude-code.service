@@ -1,0 +1,19 @@
+[Unit]
+Description=Claude Code Haha - AI Coding Assistant
+After=network.target
+
+[Service]
+Type=exec
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/claude-code
+ExecStart=/opt/claude-code/.venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=claude-code
+EnvironmentFile=/opt/claude-code/.env
+
+[Install]
+WantedBy=multi-user.target

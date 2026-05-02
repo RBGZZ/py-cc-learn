@@ -43,7 +43,7 @@ def _get_system_reminders_section() -> str:
 
 def _get_simple_intro_section(output_style_name: str | None = None) -> str:
     task_desc = (
-        "according to your \"Output Style\" below, which describes how you should respond to user queries."
+        'according to your "Output Style" below, which describes how you should respond to user queries.'
         if output_style_name
         else "with software engineering tasks."
     )
@@ -95,7 +95,7 @@ def _get_simple_system_section() -> str:
 def _get_simple_doing_tasks_section() -> str:
     code_style_items = [
         (
-            "Don't add features, refactor code, or make \"improvements\" beyond what was asked. "
+            'Don\'t add features, refactor code, or make "improvements" beyond what was asked. '
             "A bug fix doesn't need surrounding code cleaned up. A simple feature doesn't need "
             "extra configurability. Don't add docstrings, comments, or type annotations to code "
             "you didn't change. Only add comments where the logic isn't self-evident."
@@ -131,8 +131,8 @@ def _get_simple_doing_tasks_section() -> str:
             "include solving bugs, adding new functionality, refactoring code, explaining code, "
             "and more. When given an unclear or generic instruction, consider it in the context of "
             "these software engineering tasks and the current working directory. For example, if "
-            "the user asks you to change \"methodName\" to snake case, do not reply with just "
-            "\"method_name\", instead find the method in the code and modify the code."
+            'the user asks you to change "methodName" to snake case, do not reply with just '
+            '"method_name", instead find the method in the code and modify the code.'
         ),
         (
             "You are highly capable and often allow users to complete ambitious tasks that would "
@@ -259,7 +259,9 @@ def _get_using_your_tools_section(enabled_tool_names: set[str]) -> str:
             "helpful for planning your work and helping the user track your progress. Mark each "
             "task as completed as soon as you are done with the task. Do not batch up multiple "
             "tasks before marking them as completed."
-        ) if todo_write.lower() in {n.lower() for n in enabled_tool_names} else None,
+        )
+        if todo_write.lower() in {n.lower() for n in enabled_tool_names}
+        else None,
         (
             "You can call multiple tools in a single response. If you intend to call multiple "
             "tools and there are no dependencies between them, make all independent tool calls "
@@ -294,8 +296,8 @@ def _get_tone_and_style_section() -> str:
         ),
         (
             "Do not use a colon before tool calls. Your tool calls may not be shown directly "
-            "in the output, so text like \"Let me read the file:\" followed by a read tool call "
-            "should just be \"Let me read the file.\" with a period."
+            'in the output, so text like "Let me read the file:" followed by a read tool call '
+            'should just be "Let me read the file." with a period.'
         ),
     ]
     bullets = _prepend_bullets(items)
@@ -357,16 +359,12 @@ def _get_mcp_instructions_section(
         return None
 
     clients_with_instructions = [
-        c for c in mcp_clients
-        if c.get("type") == "connected" and c.get("instructions")
+        c for c in mcp_clients if c.get("type") == "connected" and c.get("instructions")
     ]
     if not clients_with_instructions:
         return None
 
-    instruction_blocks = [
-        f"## {c['name']}\n{c['instructions']}"
-        for c in clients_with_instructions
-    ]
+    instruction_blocks = [f"## {c['name']}\n{c['instructions']}" for c in clients_with_instructions]
 
     return (
         "# MCP Server Instructions\n\n"
@@ -412,7 +410,9 @@ def _get_session_specific_guidance_section(
     return "# Session-specific guidance\n" + "\n".join(bullets)
 
 
-def _compute_env_info(model_id: str, additional_working_directories: list[str] | None = None) -> str:
+def _compute_env_info(
+    model_id: str, additional_working_directories: list[str] | None = None
+) -> str:
     cwd = os.getcwd()
     is_git = _check_is_git(cwd)
     uname = _get_uname()
@@ -442,10 +442,8 @@ def _compute_env_info(model_id: str, additional_working_directories: list[str] |
     ]
     env_items = [i for i in items if i is not None]
 
-    return (
-        "# Environment\n"
-        "You have been invoked in the following environment: \n"
-        + "\n".join(_prepend_bullets(env_items))
+    return "# Environment\nYou have been invoked in the following environment: \n" + "\n".join(
+        _prepend_bullets(env_items)
     )
 
 
@@ -488,6 +486,12 @@ DEFAULT_AGENT_PROMPT = (
 )
 
 
+def _get_git_section(git_status: str | None) -> str | None:
+    if not git_status:
+        return None
+    return f"# Git Status\n\n{git_status}"
+
+
 def get_system_prompt(
     tools: list[Any],
     model: str,
@@ -496,11 +500,9 @@ def get_system_prompt(
     mcp_clients: list[dict[str, Any]] | None = None,
     output_style_config: dict[str, Any] | None = None,
     memory_content: str | None = None,
+    git_status: str | None = None,
 ) -> list[str]:
-    enabled_tool_names = {
-        t.name if hasattr(t, "name") else t.get("name", "")
-        for t in tools
-    }
+    enabled_tool_names = {t.name if hasattr(t, "name") else t.get("name", "") for t in tools}
 
     output_style_name = output_style_config.get("name") if output_style_config else None
 
@@ -516,12 +518,9 @@ def get_system_prompt(
         SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
         # --- Dynamic content ---
         _get_session_specific_guidance_section(enabled_tool_names),
-        (
-            f"# Memory\n\n{memory_content}"
-            if memory_content
-            else None
-        ),
+        (f"# Memory\n\n{memory_content}" if memory_content else None),
         _compute_env_info(model, additional_working_directories),
+        _get_git_section(git_status),
         _get_language_section(language_preference),
         _get_output_style_section(output_style_config),
         _get_mcp_instructions_section(mcp_clients),
@@ -552,8 +551,8 @@ def enhance_system_prompt_with_env_details(
         "(e.g., a bug you found, a function signature the caller asked for) — do not recap code "
         "you merely read.\n"
         "- For clear communication with the user the assistant MUST avoid using emojis.\n"
-        "- Do not use a colon before tool calls. Text like \"Let me read the file:\" followed "
-        "by a read tool call should just be \"Let me read the file.\" with a period."
+        '- Do not use a colon before tool calls. Text like "Let me read the file:" followed '
+        'by a read tool call should just be "Let me read the file." with a period.'
     )
     env_info = _compute_env_info(model, additional_working_directories)
     return existing_sections + [notes, env_info]

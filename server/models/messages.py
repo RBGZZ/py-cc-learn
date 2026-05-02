@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Union
 
-from pydantic import UUID4, BaseModel, Field
+from pydantic import BaseModel, Field
 
 
 class TextBlock(BaseModel):
@@ -16,13 +14,13 @@ class ToolUseBlock(BaseModel):
     type: str = "tool_use"
     id: str
     name: str
-    input: Dict[str, Any] = Field(default_factory=dict)
+    input: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolResultBlock(BaseModel):
     type: str = "tool_result"
     tool_use_id: str
-    content: Union[str, List[Dict[str, Any]]] = ""
+    content: str | list[dict[str, Any]] = ""
     is_error: bool = False
 
 
@@ -48,14 +46,30 @@ class RedactedThinkingBlock(BaseModel):
     data: str
 
 
-ContentBlock = Union[TextBlock, ToolUseBlock, ToolResultBlock, ImageBlock, ThinkingBlock, RedactedThinkingBlock, Dict[str, Any]]
+ContentBlock = Union[
+    TextBlock,
+    ToolUseBlock,
+    ToolResultBlock,
+    ImageBlock,
+    ThinkingBlock,
+    RedactedThinkingBlock,
+    dict[str, Any],
+]
 
-ContentBlockParam = Union[TextBlock, ToolUseBlock, ToolResultBlock, ImageBlock, ThinkingBlock, RedactedThinkingBlock, Dict[str, Any]]
+ContentBlockParam = Union[
+    TextBlock,
+    ToolUseBlock,
+    ToolResultBlock,
+    ImageBlock,
+    ThinkingBlock,
+    RedactedThinkingBlock,
+    dict[str, Any],
+]
 
 
 class Message(BaseModel):
     role: str
-    content: Union[str, List[ContentBlock]]
+    content: str | list[ContentBlock]
 
 
 class UserMessage(Message):
@@ -76,12 +90,12 @@ class ProgressMessage(BaseModel):
     tool_use_id: str
     tool_name: str
     elapsed_time_seconds: float
-    task_id: Optional[str] = None
+    task_id: str | None = None
 
 
 class AttachmentMessage(BaseModel):
     type: str = "attachment"
-    attachment: Dict[str, Any]
+    attachment: dict[str, Any]
 
 
 class RequestStartEvent(BaseModel):
@@ -91,7 +105,7 @@ class RequestStartEvent(BaseModel):
 
 class StreamEvent(BaseModel):
     type: str = "stream_event"
-    event: Dict[str, Any]
+    event: dict[str, Any]
 
 
 MessageOrigin = str
@@ -100,7 +114,7 @@ MessageOrigin = str
 class ToolUseSummaryMessage(BaseModel):
     type: str = "tool_use_summary"
     summary: str
-    preceding_tool_use_ids: List[str] = Field(default_factory=list)
+    preceding_tool_use_ids: list[str] = Field(default_factory=list)
 
 
 class TombstoneMessage(BaseModel):
@@ -111,7 +125,7 @@ class TombstoneMessage(BaseModel):
 class SystemCompactBoundaryMessage(BaseModel):
     type: str = "system"
     subtype: str = "compact_boundary"
-    compact_metadata: Dict[str, Any] = Field(default_factory=dict)
+    compact_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class SystemMicrocompactBoundaryMessage(BaseModel):
@@ -146,7 +160,7 @@ class SystemStopHookSummaryMessage(BaseModel):
 class SystemApiMetricsMessage(BaseModel):
     type: str = "system"
     subtype: str = "api_metrics"
-    metrics: Dict[str, Any]
+    metrics: dict[str, Any]
 
 
 class SystemTurnDurationMessage(BaseModel):
@@ -194,4 +208,4 @@ class SystemScheduledTaskFireMessage(BaseModel):
 
 class StopHookInfo(BaseModel):
     hook_active: bool = False
-    last_assistant_message: Optional[str] = None
+    last_assistant_message: str | None = None

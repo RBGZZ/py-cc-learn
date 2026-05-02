@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
-from server.tools.tool import Tool, Tools, find_tool_by_name, tool_matches_name
+from server.tools.tool import Tool, tool_matches_name
 
 _BASH_TOOL_NAME = "Bash"
 _FILE_READ_TOOL_NAME = "Read"
@@ -13,9 +14,7 @@ _SYNTHETIC_OUTPUT_TOOL_NAME = "SyntheticOutputTool"
 _REPL_TOOL_NAME = "REPL"
 
 
-def _get_deny_rule_for_tool(
-    permission_context: Any, tool: Tool
-) -> Optional[Dict[str, Any]]:
+def _get_deny_rule_for_tool(permission_context: Any, tool: Tool) -> dict[str, Any] | None:
     """
     Check if a tool is covered by a blanket deny rule.
     Source: getDenyRuleForTool from permissions.ts.
@@ -27,7 +26,6 @@ def _get_deny_rule_for_tool(
     always_deny_rules = getattr(permission_context, "always_deny_rules", None)
     if always_deny_rules is None:
         return None
-    tool_name = tool.name
     for source_name in [
         "userSettings",
         "projectSettings",
@@ -38,7 +36,7 @@ def _get_deny_rule_for_tool(
         "command",
         "session",
     ]:
-        rules: Optional[List[str]] = getattr(always_deny_rules, source_name, None)
+        rules: list[str] | None = getattr(always_deny_rules, source_name, None)
         if rules is None:
             continue
         for rule_str in rules:
@@ -69,9 +67,9 @@ def _get_deny_rule_for_tool(
 
 
 def filter_tools_by_deny_rules(
-    tools: List[Tool],
+    tools: list[Tool],
     permission_context: Any,
-) -> List[Tool]:
+) -> list[Tool]:
     """
     Filters out tools that are blanket-denied by the permission context.
     Source: tools.ts L253-268.
@@ -81,8 +79,8 @@ def filter_tools_by_deny_rules(
 
 def get_tools(
     permission_context: Any,
-    all_base_tools: Optional[List[Tool]] = None,
-) -> List[Tool]:
+    all_base_tools: list[Tool] | None = None,
+) -> list[Tool]:
     """
     Get built-in tools filtered by permission context and isEnabled.
     Source: tools.ts L271-327.
@@ -107,9 +105,9 @@ def get_tools(
 
 def assemble_tool_pool(
     permission_context: Any,
-    mcp_tools: List[Tool],
-    all_base_tools: Optional[List[Tool]] = None,
-) -> List[Tool]:
+    mcp_tools: list[Tool],
+    all_base_tools: list[Tool] | None = None,
+) -> list[Tool]:
     """
     Assemble the full tool pool for a given permission context and MCP tools.
     Source: tools.ts L345-367.
@@ -149,7 +147,7 @@ def assemble_tool_pool(
     combined = sorted_built_in + sorted_mcp
 
     seen: set = set()
-    result: List[Tool] = []
+    result: list[Tool] = []
     for tool in combined:
         if tool.name not in seen:
             seen.add(tool.name)
@@ -160,9 +158,9 @@ def assemble_tool_pool(
 
 def get_merged_tools(
     permission_context: Any,
-    mcp_tools: List[Tool],
-    all_base_tools: Optional[List[Tool]] = None,
-) -> List[Tool]:
+    mcp_tools: list[Tool],
+    all_base_tools: list[Tool] | None = None,
+) -> list[Tool]:
     """
     Get all tools including both built-in tools and MCP tools.
     Source: tools.ts L383-389.
@@ -178,9 +176,9 @@ def get_merged_tools(
 
 def assemble_tool_pool_from_callables(
     permission_context: Any,
-    mcp_tools: List[Tool],
-    built_in_tools_fn: Callable[[], List[Tool]],
-) -> List[Tool]:
+    mcp_tools: list[Tool],
+    built_in_tools_fn: Callable[[], list[Tool]],
+) -> list[Tool]:
     """
     Convenience wrapper that calls built_in_tools_fn at assembly time
     to support lazy-loaded tools. This ensures the function is called

@@ -140,7 +140,7 @@ class PermissionDecisionReasonMode(BaseModel):
 
 class PermissionDecisionReasonSubcommandResults(BaseModel):
     type: Literal["subcommandResults"] = "subcommandResults"
-    reasons: dict[str, "PermissionResult"] = Field(default_factory=dict)
+    reasons: dict[str, PermissionResult] = Field(default_factory=dict)
 
 
 class PermissionDecisionReasonPermissionPromptTool(BaseModel):

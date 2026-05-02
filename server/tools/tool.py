@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, List, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
 
@@ -23,10 +23,11 @@ class ToolCallResult(BaseModel):
       - contextModifier: only honored for non-concurrency-safe tools
       - mcpMeta: MCP protocol metadata for SDK consumers
     """
+
     data: Any = None
-    new_messages: Optional[List[Any]] = None
-    context_modifier: Optional[Any] = None
-    mcp_meta: Optional[Dict[str, Any]] = None
+    new_messages: list[Any] | None = None
+    context_modifier: Any | None = None
+    mcp_meta: dict[str, Any] | None = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -49,7 +50,7 @@ class AssistantMessage(BaseModel):
 
 class PermissionResult(BaseModel):
     behavior: str = "allow"
-    updated_input: Optional[Dict[str, Any]] = None
+    updated_input: dict[str, Any] | None = None
     message: str = ""
 
 
@@ -100,54 +101,47 @@ class Tool(
         can_use_tool: Any,
         parent_message: Any,
         on_progress: Any = None,
-    ) -> ToolCallResult:
-        ...
+    ) -> ToolCallResult: ...
 
     @abstractmethod
-    async def description(self, input: TInput, options: Dict[str, Any]) -> str:
-        ...
+    async def description(self, input: TInput, options: dict[str, Any]) -> str: ...
 
     @abstractmethod
-    async def prompt(self, options: Dict[str, Any]) -> str:
-        ...
+    async def prompt(self, options: dict[str, Any]) -> str: ...
 
     @abstractmethod
-    def user_facing_name(self, input: Optional[Dict[str, Any]] = None) -> str:
-        ...
+    def user_facing_name(self, input: dict[str, Any] | None = None) -> str: ...
 
     @abstractmethod
-    def to_auto_classifier_input(self, input: TInput) -> Any:
-        ...
+    def to_auto_classifier_input(self, input: TInput) -> Any: ...
 
     @abstractmethod
     def map_tool_result_to_tool_result_block_param(
         self, content: TOutput, tool_use_id: str
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
     @abstractmethod
-    def render_tool_use_message(self, input: Dict[str, Any], options: Dict[str, Any]) -> Any:
-        ...
+    def render_tool_use_message(self, input: dict[str, Any], options: dict[str, Any]) -> Any: ...
 
     # ---------- optional fields ----------
 
     @property
-    def aliases(self) -> Optional[List[str]]:
+    def aliases(self) -> list[str] | None:
         """Optional aliases for backwards compatibility when a tool is renamed."""
         return None
 
     @property
-    def search_hint(self) -> Optional[str]:
+    def search_hint(self) -> str | None:
         """One-line capability phrase used by ToolSearch for keyword matching. 3-10 words, no trailing period."""
         return None
 
     @property
-    def input_json_schema(self) -> Optional[ToolInputJSONSchema]:
+    def input_json_schema(self) -> ToolInputJSONSchema | None:
         """Input schema directly in JSON Schema format (for MCP tools)."""
         return None
 
     @property
-    def output_schema(self) -> Optional[Any]:
+    def output_schema(self) -> Any | None:
         """Output Zod schema (optional, some tools don't define this)."""
         return None
 
@@ -175,7 +169,7 @@ class Tool(
         """Returns 'block' by default (keep running when interrupted). 'cancel' means stop the tool."""
         return "block"
 
-    def is_search_or_read_command(self, input: TInput) -> Optional[Dict[str, bool]]:
+    def is_search_or_read_command(self, input: TInput) -> dict[str, bool] | None:
         """Returns info about whether tool use is search/read/list operation."""
         return None
 
@@ -208,7 +202,7 @@ class Tool(
         return False
 
     @property
-    def mcp_info(self) -> Optional[Dict[str, str]]:
+    def mcp_info(self) -> dict[str, str] | None:
         """MCP server/tool names as received from the MCP server."""
         return None
 
@@ -217,7 +211,7 @@ class Tool(
         """When True, enables strict mode for this tool in the API call."""
         return False
 
-    def backfill_observable_input(self, input: Dict[str, Any]) -> None:
+    def backfill_observable_input(self, input: dict[str, Any]) -> None:
         """Called on copies of tool_use input before observers see it. Mutate in place. Must be idempotent."""
         pass
 
@@ -225,23 +219,19 @@ class Tool(
         """Determines if this tool is allowed to run with this input."""
         return ValidationResult(valid=True)
 
-    async def check_permissions(self, input: Dict[str, Any], context: Any) -> PermissionResult:
+    async def check_permissions(self, input: dict[str, Any], context: Any) -> PermissionResult:
         """Determines if the user is asked for permission. Default: allow. Source: TOOL_DEFAULTS."""
         return PermissionResult(behavior="allow", updated_input=input)
 
-    def get_path(self, input: TInput) -> Optional[str]:
+    def get_path(self, input: TInput) -> str | None:
         """Optional method for tools that operate on a file path."""
         return None
 
-    async def prepare_permission_matcher(
-        self, input: TInput
-    ) -> Optional[Any]:
+    async def prepare_permission_matcher(self, input: TInput) -> Any | None:
         """Prepare a matcher for hook 'if' conditions. Returns a callable."""
         return None
 
-    def user_facing_name_background_color(
-        self, input: Optional[Dict[str, Any]] = None
-    ) -> Optional[str]:
+    def user_facing_name_background_color(self, input: dict[str, Any] | None = None) -> str | None:
         """Returns a theme color key for the user-facing name background."""
         return None
 
@@ -249,28 +239,24 @@ class Tool(
         """Transparent wrappers delegate rendering to their progress handler."""
         return False
 
-    def get_tool_use_summary(
-        self, input: Optional[Dict[str, Any]] = None
-    ) -> Optional[str]:
+    def get_tool_use_summary(self, input: dict[str, Any] | None = None) -> str | None:
         """Short string summary of this tool use for display in compact views."""
         return None
 
-    def get_activity_description(
-        self, input: Optional[Dict[str, Any]] = None
-    ) -> Optional[str]:
+    def get_activity_description(self, input: dict[str, Any] | None = None) -> str | None:
         """Human-readable present-tense activity description for spinner display."""
         return None
 
     def render_tool_result_message(
         self,
         content: TOutput,
-        progress_messages_for_message: List[Any],
-        options: Dict[str, Any],
+        progress_messages_for_message: list[Any],
+        options: dict[str, Any],
     ) -> Any:
         """Render the tool result. Optional - when omitted, result renders nothing."""
         return None
 
-    def extract_search_text(self, out: TOutput) -> Optional[str]:
+    def extract_search_text(self, out: TOutput) -> str | None:
         """Flattened text of renderToolResultMessage IN TRANSCRIPT MODE."""
         return None
 
@@ -278,14 +264,14 @@ class Tool(
         """Returns True when non-verbose rendering of this output is truncated."""
         return False
 
-    def render_tool_use_tag(self, input: Dict[str, Any]) -> Any:
+    def render_tool_use_tag(self, input: dict[str, Any]) -> Any:
         """Renders optional tag to display after the tool use message."""
         return None
 
     def render_tool_use_progress_message(
         self,
-        progress_messages_for_message: List[Any],
-        options: Dict[str, Any],
+        progress_messages_for_message: list[Any],
+        options: dict[str, Any],
     ) -> Any:
         """Render progress UI while the tool runs."""
         return None
@@ -294,28 +280,24 @@ class Tool(
         """Render queued UI before execution starts."""
         return None
 
-    def render_tool_use_rejected_message(
-        self, input: TInput, options: Dict[str, Any]
-    ) -> Any:
+    def render_tool_use_rejected_message(self, input: TInput, options: dict[str, Any]) -> Any:
         """Custom rejection UI. Falls back to FallbackToolUseRejectedMessage."""
         return None
 
-    def render_tool_use_error_message(
-        self, result: Any, options: Dict[str, Any]
-    ) -> Any:
+    def render_tool_use_error_message(self, result: Any, options: dict[str, Any]) -> Any:
         """Custom error UI. Falls back to FallbackToolUseErrorMessage."""
         return None
 
     def render_grouped_tool_use(
         self,
-        tool_uses: List[Dict[str, Any]],
-        options: Dict[str, Any],
+        tool_uses: list[dict[str, Any]],
+        options: dict[str, Any],
     ) -> Any:
         """Renders multiple tool uses as a group (non-verbose mode only)."""
         return None
 
 
-Tools = List[Tool]
+Tools = list[Tool]
 
 
 def tool_matches_name(tool: Tool, name: str) -> bool:
@@ -328,7 +310,7 @@ def tool_matches_name(tool: Tool, name: str) -> bool:
     return False
 
 
-def find_tool_by_name(tools: Tools, name: str) -> Optional[Tool]:
+def find_tool_by_name(tools: Tools, name: str) -> Tool | None:
     """Finds a tool by name or alias from a list of tools. Source: Tool.ts L358-360."""
     for t in tools:
         if tool_matches_name(t, name):
@@ -371,10 +353,10 @@ class ToolDef:
         render_tool_use_message: Any,
         map_tool_result_to_tool_result_block_param: Any,
         max_result_size_chars: int = 30000,
-        aliases: Optional[List[str]] = None,
-        search_hint: Optional[str] = None,
-        input_json_schema: Optional[ToolInputJSONSchema] = None,
-        output_schema: Optional[Any] = None,
+        aliases: list[str] | None = None,
+        search_hint: str | None = None,
+        input_json_schema: ToolInputJSONSchema | None = None,
+        output_schema: Any | None = None,
         inputs_equivalent: Any = None,
         is_concurrency_safe: Any = None,
         is_enabled: Any = None,
@@ -388,7 +370,7 @@ class ToolDef:
         is_lsp: bool = False,
         should_defer: bool = False,
         always_load: bool = False,
-        mcp_info: Optional[Dict[str, str]] = None,
+        mcp_info: dict[str, str] | None = None,
         strict: bool = False,
         backfill_observable_input: Any = None,
         validate_input: Any = None,
@@ -417,7 +399,9 @@ class ToolDef:
         self.def_description = description
         self.def_prompt = prompt
         self.def_render_tool_use_message = render_tool_use_message
-        self.def_map_tool_result_to_tool_result_block_param = map_tool_result_to_tool_result_block_param
+        self.def_map_tool_result_to_tool_result_block_param = (
+            map_tool_result_to_tool_result_block_param
+        )
         self.def_max_result_size_chars = max_result_size_chars
         self.def_aliases = aliases
         self.def_search_hint = search_hint
@@ -481,11 +465,11 @@ def build_tool(def_: ToolDef) -> Tool:
             return def_.def_name
 
         @property
-        def aliases(self) -> Optional[List[str]]:
+        def aliases(self) -> list[str] | None:
             return def_.def_aliases
 
         @property
-        def search_hint(self) -> Optional[str]:
+        def search_hint(self) -> str | None:
             return def_.def_search_hint
 
         @property
@@ -493,11 +477,11 @@ def build_tool(def_: ToolDef) -> Tool:
             return def_.def_input_schema
 
         @property
-        def input_json_schema(self) -> Optional[ToolInputJSONSchema]:
+        def input_json_schema(self) -> ToolInputJSONSchema | None:
             return def_.def_input_json_schema
 
         @property
-        def output_schema(self) -> Optional[Any]:
+        def output_schema(self) -> Any | None:
             return def_.def_output_schema
 
         @property
@@ -521,7 +505,7 @@ def build_tool(def_: ToolDef) -> Tool:
             return def_.def_always_load
 
         @property
-        def mcp_info(self) -> Optional[Dict[str, str]]:
+        def mcp_info(self) -> dict[str, str] | None:
             return def_.def_mcp_info
 
         @property
@@ -640,7 +624,9 @@ def build_tool(def_: ToolDef) -> Tool:
 
         def render_tool_result_message(self, content, progress_messages_for_message, options):
             if def_.def_render_tool_result_message is not None:
-                return def_.def_render_tool_result_message(content, progress_messages_for_message, options)
+                return def_.def_render_tool_result_message(
+                    content, progress_messages_for_message, options
+                )
             return None
 
         def extract_search_text(self, out):
@@ -660,7 +646,9 @@ def build_tool(def_: ToolDef) -> Tool:
 
         def render_tool_use_progress_message(self, progress_messages_for_message, options):
             if def_.def_render_tool_use_progress_message is not None:
-                return def_.def_render_tool_use_progress_message(progress_messages_for_message, options)
+                return def_.def_render_tool_use_progress_message(
+                    progress_messages_for_message, options
+                )
             return None
 
         def render_tool_use_queued_message(self):

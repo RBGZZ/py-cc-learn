@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick } from 'vue'
+import { getImageFromClipboard, type UploadedImage } from '../utils/clipboard'
 
 const props = defineProps<{
   disabled?: boolean
@@ -8,6 +9,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'submit', text: string): void
   (e: 'stop'): void
+  (e: 'imagePaste', image: UploadedImage): void
 }>()
 
 const inputText = ref('')
@@ -30,6 +32,32 @@ function handleKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     handleSubmit()
+  }
+}
+
+async function handlePaste(e: ClipboardEvent): Promise<void> {
+  const clipboardData = e.clipboardData
+  if (!clipboardData) return
+
+  const items = clipboardData.items
+  let hasImage = false
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type.startsWith('image/')) {
+      hasImage = true
+      break
+    }
+  }
+
+  if (hasImage) {
+    e.preventDefault()
+    try {
+      const image = await getImageFromClipboard()
+      if (image) {
+        emit('imagePaste', image)
+      }
+    } catch (err) {
+      console.error('Failed to process clipboard image:', err)
+    }
   }
 }
 
@@ -56,6 +84,7 @@ function autoResize(): void {
       rows="1"
       @keydown="handleKeydown"
       @input="autoResize"
+      @paste="handlePaste"
     ></textarea>
     <div class="chat-input-actions">
       <button

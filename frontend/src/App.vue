@@ -2,6 +2,7 @@
 import { onMounted } from 'vue'
 import { useChatStore } from './stores/chat'
 import { useSSE } from './utils/sse'
+import type { UploadedImage } from './utils/clipboard'
 import ChatMessages from './components/ChatMessages.vue'
 import ChatInput from './components/ChatInput.vue'
 import StatusBar from './components/StatusBar.vue'
@@ -18,6 +19,13 @@ function handleSubmit(text: string) {
   store.addMessage({ role: 'user', content: text })
   store.setProcessing(true)
   connect(text)
+}
+
+function handleImagePaste(image: UploadedImage) {
+  const imageMarkdown = `![image](data:image/${image.format.toLowerCase()};base64,${image.base64})`
+  store.addMessage({ role: 'user', content: imageMarkdown })
+  store.setProcessing(true)
+  connect(imageMarkdown)
 }
 
 function handleStop() {
@@ -41,6 +49,7 @@ function handleStop() {
         :disabled="store.isProcessing"
         @submit="handleSubmit"
         @stop="handleStop"
+        @image-paste="handleImagePaste"
       />
     </footer>
   </div>

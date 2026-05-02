@@ -57,6 +57,15 @@ dev = [
 [project.scripts]
 haha = "server.cli:main"
 
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.1.0",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["server", "sandbox"]
 

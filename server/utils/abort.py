@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 import signal
 import weakref
-from typing import Optional
-
 
 DEFAULT_MAX_LISTENERS = 50
 
@@ -12,7 +10,7 @@ DEFAULT_MAX_LISTENERS = 50
 class AbortController:
     def __init__(self, max_listeners: int = DEFAULT_MAX_LISTENERS) -> None:
         self._event = asyncio.Event()
-        self._reason: Optional[str] = None
+        self._reason: str | None = None
 
     @property
     def signal(self) -> asyncio.Event:
@@ -23,10 +21,10 @@ class AbortController:
         return self._event.is_set()
 
     @property
-    def reason(self) -> Optional[str]:
+    def reason(self) -> str | None:
         return self._reason
 
-    def abort(self, reason: Optional[str] = None) -> None:
+    def abort(self, reason: str | None = None) -> None:
         self._reason = reason
         self._event.set()
 
@@ -71,8 +69,8 @@ def create_child_abort_controller(
 
 async def wait_for_with_abort(
     coro,
-    timeout: Optional[float],
-    abort_controller: Optional[AbortController] = None,
+    timeout: float | None,
+    abort_controller: AbortController | None = None,
 ):
     if abort_controller is not None and abort_controller.aborted:
         raise asyncio.CancelledError("Aborted")
@@ -95,7 +93,7 @@ async def wait_for_with_abort(
             else:
                 try:
                     return await asyncio.wait_for(main_task, timeout=timeout)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     raise
             if abort_task in done:
                 main_task.cancel()
@@ -118,7 +116,7 @@ async def wait_for_with_abort(
                     await task
                 except asyncio.CancelledError:
                     pass
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
         else:
             if abort_controller is not None:
                 done, pending = await asyncio.wait(
@@ -167,7 +165,7 @@ async def force_kill_process(
         try:
             await asyncio.wait_for(process.wait(), timeout=timeout_grace)
             return
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
         if hasattr(signal, "SIGKILL"):

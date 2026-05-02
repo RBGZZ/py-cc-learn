@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from server.models.permissions import (
-    DENIAL_LIMITS,
     PERMISSION_RULE_SOURCES,
     PROTECTED_NAMESPACES,
     SENSITIVE_SHELL_FILES,
@@ -13,16 +11,9 @@ from server.models.permissions import (
     PermissionBehavior,
     PermissionDecision,
     PermissionDecisionReasonAsyncAgent,
-    PermissionDecisionReasonClassifier,
-    PermissionDecisionReasonHook,
     PermissionDecisionReasonMode,
-    PermissionDecisionReasonOther,
     PermissionDecisionReasonRule,
     PermissionDecisionReasonSafetyCheck,
-    PermissionDecisionReasonSandboxOverride,
-    PermissionDecisionReasonSubcommandResults,
-    PermissionDecisionReasonWorkingDir,
-    PermissionDecisionReasonPermissionPromptTool,
     PermissionDenyDecision,
     PermissionMode,
     PermissionPassthrough,
@@ -31,13 +22,13 @@ from server.models.permissions import (
     PermissionRuleSource,
     PermissionRuleValue,
     PermissionUpdate,
+    PermissionUpdateAddDirectories,
     PermissionUpdateAddRules,
     PermissionUpdateDestination,
+    PermissionUpdateRemoveDirectories,
     PermissionUpdateRemoveRules,
     PermissionUpdateReplaceRules,
     PermissionUpdateSetMode,
-    PermissionUpdateAddDirectories,
-    PermissionUpdateRemoveDirectories,
     ToolPermissionContext,
     ToolPermissionRulesBySource,
 )
@@ -168,21 +159,15 @@ def _get_rules_from_source(
 
 
 def get_allow_rules(context: ToolPermissionContext) -> list[PermissionRule]:
-    return _get_rules_from_source(
-        context, context.always_allow_rules, PermissionBehavior.ALLOW
-    )
+    return _get_rules_from_source(context, context.always_allow_rules, PermissionBehavior.ALLOW)
 
 
 def get_deny_rules(context: ToolPermissionContext) -> list[PermissionRule]:
-    return _get_rules_from_source(
-        context, context.always_deny_rules, PermissionBehavior.DENY
-    )
+    return _get_rules_from_source(context, context.always_deny_rules, PermissionBehavior.DENY)
 
 
 def get_ask_rules(context: ToolPermissionContext) -> list[PermissionRule]:
-    return _get_rules_from_source(
-        context, context.always_ask_rules, PermissionBehavior.ASK
-    )
+    return _get_rules_from_source(context, context.always_ask_rules, PermissionBehavior.ASK)
 
 
 def tool_matches_rule(tool: Any, rule: PermissionRule) -> bool:
@@ -205,27 +190,21 @@ def tool_matches_rule(tool: Any, rule: PermissionRule) -> bool:
     )
 
 
-def tool_always_allowed_rule(
-    context: ToolPermissionContext, tool: Any
-) -> PermissionRule | None:
+def tool_always_allowed_rule(context: ToolPermissionContext, tool: Any) -> PermissionRule | None:
     for rule in get_allow_rules(context):
         if tool_matches_rule(tool, rule):
             return rule
     return None
 
 
-def get_deny_rule_for_tool(
-    context: ToolPermissionContext, tool: Any
-) -> PermissionRule | None:
+def get_deny_rule_for_tool(context: ToolPermissionContext, tool: Any) -> PermissionRule | None:
     for rule in get_deny_rules(context):
         if tool_matches_rule(tool, rule):
             return rule
     return None
 
 
-def get_ask_rule_for_tool(
-    context: ToolPermissionContext, tool: Any
-) -> PermissionRule | None:
+def get_ask_rule_for_tool(context: ToolPermissionContext, tool: Any) -> PermissionRule | None:
     for rule in get_ask_rules(context):
         if tool_matches_rule(tool, rule):
             return rule
@@ -308,8 +287,7 @@ def create_permission_request_message(
                     f"{decision_reason.reason}"
                 )
             return (
-                f"Hook '{decision_reason.hook_name}' requires approval "
-                f"for this {tool_name} command"
+                f"Hook '{decision_reason.hook_name}' requires approval for this {tool_name} command"
             )
 
         if reason_type == "rule":
@@ -334,10 +312,7 @@ def create_permission_request_message(
                     f"The following {n} part{'s' if n > 1 else ''} {verb} "
                     f"approval: {', '.join(needs_approval)}"
                 )
-            return (
-                f"This {tool_name} command contains multiple operations "
-                f"that require approval"
-            )
+            return f"This {tool_name} command contains multiple operations that require approval"
 
         if reason_type == "permissionPromptTool":
             return (
@@ -360,10 +335,7 @@ def create_permission_request_message(
         if reason_type == "asyncAgent":
             return decision_reason.reason
 
-    return (
-        f"Claude requested permissions to use {tool_name}, "
-        f"but you haven't granted it yet."
-    )
+    return f"Claude requested permissions to use {tool_name}, but you haven't granted it yet."
 
 
 def _is_in_protected_namespace(path: str) -> bool:
@@ -461,7 +433,7 @@ async def has_permissions_to_use_tool_inner(
         parsed_input = tool.inputSchema(input_data)
         if hasattr(tool, "checkPermissions"):
             tool_permission_result = await tool.checkPermissions(parsed_input, context)
-    except Exception as e:
+    except Exception:
         pass
 
     if hasattr(tool_permission_result, "behavior") and tool_permission_result.behavior == "deny":
@@ -493,12 +465,8 @@ async def has_permissions_to_use_tool_inner(
     app_state = context.getAppState()
     perm_ctx = app_state.toolPermissionContext
 
-    should_bypass = (
-        perm_ctx.mode == PermissionMode.BYPASS_PERMISSIONS
-        or (
-            perm_ctx.mode == PermissionMode.PLAN
-            and perm_ctx.is_bypass_permissions_mode_available
-        )
+    should_bypass = perm_ctx.mode == PermissionMode.BYPASS_PERMISSIONS or (
+        perm_ctx.mode == PermissionMode.PLAN and perm_ctx.is_bypass_permissions_mode_available
     )
     if should_bypass:
         return PermissionAllowDecision(
@@ -564,16 +532,10 @@ async def has_permissions_to_use_tool(
             decision_reason=PermissionDecisionReasonMode(type="mode", mode=PermissionMode.DONT_ASK),
         )
 
-    if (
-        result.behavior == "ask"
-        and perm_ctx.mode == PermissionMode.BUBBLE
-    ):
+    if result.behavior == "ask" and perm_ctx.mode == PermissionMode.BUBBLE:
         return result
 
-    if (
-        result.behavior == "ask"
-        and getattr(perm_ctx, "should_avoid_permission_prompts", None)
-    ):
+    if result.behavior == "ask" and getattr(perm_ctx, "should_avoid_permission_prompts", None):
         return PermissionDenyDecision(
             behavior="deny",
             message=(
@@ -693,9 +655,7 @@ def apply_permission_update(
     if isinstance(update, PermissionUpdateAddRules):
         behavior = update.behavior
         dest = update.destination.value
-        rule_strings = [
-            permission_rule_value_to_string(rv) for rv in update.rules
-        ]
+        rule_strings = [permission_rule_value_to_string(rv) for rv in update.rules]
         if behavior == PermissionBehavior.ALLOW:
             new_rules = context.always_allow_rules.model_copy(deep=True)
         elif behavior == PermissionBehavior.DENY:
@@ -717,9 +677,7 @@ def apply_permission_update(
     if isinstance(update, PermissionUpdateRemoveRules):
         behavior = update.behavior
         dest = update.destination.value
-        remove_set = {
-            permission_rule_value_to_string(rv) for rv in update.rules
-        }
+        remove_set = {permission_rule_value_to_string(rv) for rv in update.rules}
         if behavior == PermissionBehavior.ALLOW:
             new_rules = context.always_allow_rules.model_copy(deep=True)
         elif behavior == PermissionBehavior.DENY:
@@ -741,9 +699,7 @@ def apply_permission_update(
     if isinstance(update, PermissionUpdateReplaceRules):
         behavior = update.behavior
         dest = update.destination.value
-        rule_strings = [
-            permission_rule_value_to_string(rv) for rv in update.rules
-        ]
+        rule_strings = [permission_rule_value_to_string(rv) for rv in update.rules]
         if behavior == PermissionBehavior.ALLOW:
             new_rules = context.always_allow_rules.model_copy(deep=True)
         elif behavior == PermissionBehavior.DENY:
@@ -763,6 +719,7 @@ def apply_permission_update(
     if isinstance(update, PermissionUpdateAddDirectories):
         new_dirs = dict(context.additional_working_directories)
         from server.models.permissions import AdditionalWorkingDirectory
+
         target_source = PermissionRuleSource(update.destination.value)
         for d in update.directories:
             new_dirs[d] = AdditionalWorkingDirectory(path=d, source=target_source)

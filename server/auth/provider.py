@@ -6,7 +6,6 @@ import os
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -23,7 +22,7 @@ class ApiKeySource(str, Enum):
 
 
 class ApiKeyResult:
-    def __init__(self, key: Optional[str], source: ApiKeySource) -> None:
+    def __init__(self, key: str | None, source: ApiKeySource) -> None:
         self.key = key
         self.source = source
 
@@ -83,7 +82,7 @@ class ApiKeyStore:
         if sys.platform != "win32":
             os.chmod(key_path, 0o600)
 
-    def load(self, vendor: str) -> Optional[str]:
+    def load(self, vendor: str) -> str | None:
         key_path = self._config_dir / self._KEY_FILE
         if not key_path.exists():
             return None
@@ -116,7 +115,7 @@ class ApiKeyStore:
             pass
 
 
-_api_key_store: Optional[ApiKeyStore] = None
+_api_key_store: ApiKeyStore | None = None
 
 
 def get_api_key_store() -> ApiKeyStore:
@@ -156,25 +155,25 @@ def get_anthropic_api_key_with_source() -> ApiKeyResult:
     return ApiKeyResult(key=None, source=ApiKeySource.NONE)
 
 
-def get_anthropic_api_key() -> Optional[str]:
+def get_anthropic_api_key() -> str | None:
     return get_anthropic_api_key_with_source().key
 
 
-def get_openai_api_key() -> Optional[str]:
+def get_openai_api_key() -> str | None:
     settings = get_settings()
     if settings.openai_api_key:
         return settings.openai_api_key
     return get_api_key_store().load("openai")
 
 
-def get_deepseek_api_key() -> Optional[str]:
+def get_deepseek_api_key() -> str | None:
     settings = get_settings()
     if settings.deepseek_api_key:
         return settings.deepseek_api_key
     return get_api_key_store().load("deepseek")
 
 
-def get_google_api_key() -> Optional[str]:
+def get_google_api_key() -> str | None:
     settings = get_settings()
     if settings.google_api_key:
         return settings.google_api_key

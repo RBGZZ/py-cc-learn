@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal, Union
 
 from pydantic import UUID4, BaseModel, Field
 
@@ -66,21 +66,21 @@ class ModelUsage(BaseModel):
 class SDKPermissionDenial(BaseModel):
     tool_name: str
     tool_use_id: str
-    tool_input: Dict[str, Any] = Field(default_factory=dict)
+    tool_input: dict[str, Any] = Field(default_factory=dict)
 
 
 class SDKRateLimitInfo(BaseModel):
     status: Literal["allowed", "allowed_warning", "rejected"]
-    resets_at: Optional[int] = None
-    rate_limit_type: Optional[
-        Literal["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet", "overage"]
-    ] = None
-    utilization: Optional[float] = None
-    overage_status: Optional[Literal["allowed", "allowed_warning", "rejected"]] = None
-    overage_resets_at: Optional[int] = None
-    overage_disabled_reason: Optional[str] = None
-    is_using_overage: Optional[bool] = None
-    surpassed_threshold: Optional[int] = None
+    resets_at: int | None = None
+    rate_limit_type: (
+        Literal["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet", "overage"] | None
+    ) = None
+    utilization: float | None = None
+    overage_status: Literal["allowed", "allowed_warning", "rejected"] | None = None
+    overage_resets_at: int | None = None
+    overage_disabled_reason: str | None = None
+    is_using_overage: bool | None = None
+    surpassed_threshold: int | None = None
 
 
 class SDKResultSuccess(BaseModel):
@@ -91,13 +91,13 @@ class SDKResultSuccess(BaseModel):
     is_error: bool
     num_turns: int
     result: str
-    stop_reason: Optional[str] = None
+    stop_reason: str | None = None
     total_cost_usd: float
-    usage: Dict[str, Any] = Field(default_factory=dict)
-    model_usage: Dict[str, ModelUsage] = Field(default_factory=dict)
-    permission_denials: List[SDKPermissionDenial] = Field(default_factory=list)
-    structured_output: Optional[Any] = None
-    fast_mode_state: Optional[FastModeState] = None
+    usage: dict[str, Any] = Field(default_factory=dict)
+    model_usage: dict[str, ModelUsage] = Field(default_factory=dict)
+    permission_denials: list[SDKPermissionDenial] = Field(default_factory=list)
+    structured_output: Any | None = None
+    fast_mode_state: FastModeState | None = None
     uuid: UUID4
     session_id: str
 
@@ -114,37 +114,37 @@ class SDKResultError(BaseModel):
     duration_api_ms: int
     is_error: bool
     num_turns: int
-    stop_reason: Optional[str] = None
+    stop_reason: str | None = None
     total_cost_usd: float
-    usage: Dict[str, Any] = Field(default_factory=dict)
-    model_usage: Dict[str, ModelUsage] = Field(default_factory=dict)
-    permission_denials: List[SDKPermissionDenial] = Field(default_factory=list)
-    errors: List[str] = Field(default_factory=list)
-    fast_mode_state: Optional[FastModeState] = None
+    usage: dict[str, Any] = Field(default_factory=dict)
+    model_usage: dict[str, ModelUsage] = Field(default_factory=dict)
+    permission_denials: list[SDKPermissionDenial] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    fast_mode_state: FastModeState | None = None
     uuid: UUID4
     session_id: str
 
 
 class SDKUserMessage(BaseModel):
     type: Literal["user"]
-    message: Dict[str, Any] = Field(default_factory=dict)
-    parent_tool_use_id: Optional[str] = None
-    is_synthetic: Optional[bool] = None
-    tool_use_result: Optional[Any] = None
-    priority: Optional[Literal["now", "next", "later"]] = None
-    timestamp: Optional[str] = None
-    uuid: Optional[UUID4] = None
-    session_id: Optional[str] = None
+    message: dict[str, Any] = Field(default_factory=dict)
+    parent_tool_use_id: str | None = None
+    is_synthetic: bool | None = None
+    tool_use_result: Any | None = None
+    priority: Literal["now", "next", "later"] | None = None
+    timestamp: str | None = None
+    uuid: UUID4 | None = None
+    session_id: str | None = None
 
 
 class SDKUserMessageReplay(BaseModel):
     type: Literal["user"]
-    message: Dict[str, Any] = Field(default_factory=dict)
-    parent_tool_use_id: Optional[str] = None
-    is_synthetic: Optional[bool] = None
-    tool_use_result: Optional[Any] = None
-    priority: Optional[Literal["now", "next", "later"]] = None
-    timestamp: Optional[str] = None
+    message: dict[str, Any] = Field(default_factory=dict)
+    parent_tool_use_id: str | None = None
+    is_synthetic: bool | None = None
+    tool_use_result: Any | None = None
+    priority: Literal["now", "next", "later"] | None = None
+    timestamp: str | None = None
     uuid: UUID4
     session_id: str
     is_replay: Literal[True] = True
@@ -152,9 +152,9 @@ class SDKUserMessageReplay(BaseModel):
 
 class SDKAssistantMessage(BaseModel):
     type: Literal["assistant"]
-    message: Dict[str, Any] = Field(default_factory=dict)
-    parent_tool_use_id: Optional[str] = None
-    error: Optional[SDKAssistantMessageError] = None
+    message: dict[str, Any] = Field(default_factory=dict)
+    parent_tool_use_id: str | None = None
+    error: SDKAssistantMessageError | None = None
     uuid: UUID4
     session_id: str
 
@@ -162,28 +162,28 @@ class SDKAssistantMessage(BaseModel):
 class SDKSystemMessage(BaseModel):
     type: Literal["system"]
     subtype: Literal["init"]
-    agents: Optional[List[str]] = None
+    agents: list[str] | None = None
     api_key_source: ApiKeySource
-    betas: Optional[List[str]] = None
+    betas: list[str] | None = None
     claude_code_version: str
     cwd: str
-    tools: List[str] = Field(default_factory=list)
-    mcp_servers: List[Dict[str, Any]] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     model: str
     permission_mode: ExternalPermissionMode
-    slash_commands: List[str] = Field(default_factory=list)
+    slash_commands: list[str] = Field(default_factory=list)
     output_style: str = ""
-    skills: List[str] = Field(default_factory=list)
-    plugins: List[Dict[str, Any]] = Field(default_factory=list)
-    fast_mode_state: Optional[FastModeState] = None
+    skills: list[str] = Field(default_factory=list)
+    plugins: list[dict[str, Any]] = Field(default_factory=list)
+    fast_mode_state: FastModeState | None = None
     uuid: UUID4
     session_id: str
 
 
 class SDKPartialAssistantMessage(BaseModel):
     type: Literal["stream_event"]
-    event: Dict[str, Any] = Field(default_factory=dict)
-    parent_tool_use_id: Optional[str] = None
+    event: dict[str, Any] = Field(default_factory=dict)
+    parent_tool_use_id: str | None = None
     uuid: UUID4
     session_id: str
 
@@ -191,7 +191,7 @@ class SDKPartialAssistantMessage(BaseModel):
 class SDKCompactBoundaryMessage(BaseModel):
     type: Literal["system"]
     subtype: Literal["compact_boundary"]
-    compact_metadata: Dict[str, Any] = Field(default_factory=dict)
+    compact_metadata: dict[str, Any] = Field(default_factory=dict)
     uuid: UUID4
     session_id: str
 
@@ -199,8 +199,8 @@ class SDKCompactBoundaryMessage(BaseModel):
 class SDKStatusMessage(BaseModel):
     type: Literal["system"]
     subtype: Literal["status"]
-    status: Optional[str] = None
-    permission_mode: Optional[ExternalPermissionMode] = None
+    status: str | None = None
+    permission_mode: ExternalPermissionMode | None = None
     uuid: UUID4
     session_id: str
 
@@ -211,7 +211,7 @@ class SDKAPIRetryMessage(BaseModel):
     attempt: int
     max_retries: int
     retry_delay_ms: int
-    error_status: Optional[int] = None
+    error_status: int | None = None
     error: SDKAssistantMessageError
     uuid: UUID4
     session_id: str
@@ -257,7 +257,7 @@ class SDKHookResponseMessage(BaseModel):
     output: str
     stdout: str
     stderr: str
-    exit_code: Optional[int] = None
+    exit_code: int | None = None
     outcome: Literal["success", "error", "cancelled"]
     uuid: UUID4
     session_id: str
@@ -267,9 +267,9 @@ class SDKToolProgressMessage(BaseModel):
     type: Literal["tool_progress"]
     tool_use_id: str
     tool_name: str
-    parent_tool_use_id: Optional[str] = None
+    parent_tool_use_id: str | None = None
     elapsed_time_seconds: float
-    task_id: Optional[str] = None
+    task_id: str | None = None
     uuid: UUID4
     session_id: str
 
@@ -277,8 +277,8 @@ class SDKToolProgressMessage(BaseModel):
 class SDKAuthStatusMessage(BaseModel):
     type: Literal["auth_status"]
     is_authenticating: bool
-    output: List[str] = Field(default_factory=list)
-    error: Optional[str] = None
+    output: list[str] = Field(default_factory=list)
+    error: str | None = None
     uuid: UUID4
     session_id: str
 
@@ -287,11 +287,11 @@ class SDKTaskNotificationMessage(BaseModel):
     type: Literal["system"]
     subtype: Literal["task_notification"]
     task_id: str
-    tool_use_id: Optional[str] = None
+    tool_use_id: str | None = None
     status: Literal["completed", "failed", "stopped"]
     output_file: str
     summary: str
-    usage: Optional[Dict[str, Any]] = None
+    usage: dict[str, Any] | None = None
     uuid: UUID4
     session_id: str
 
@@ -300,11 +300,11 @@ class SDKTaskStartedMessage(BaseModel):
     type: Literal["system"]
     subtype: Literal["task_started"]
     task_id: str
-    tool_use_id: Optional[str] = None
+    tool_use_id: str | None = None
     description: str
-    task_type: Optional[str] = None
-    workflow_name: Optional[str] = None
-    prompt: Optional[str] = None
+    task_type: str | None = None
+    workflow_name: str | None = None
+    prompt: str | None = None
     uuid: UUID4
     session_id: str
 
@@ -313,11 +313,11 @@ class SDKTaskProgressMessage(BaseModel):
     type: Literal["system"]
     subtype: Literal["task_progress"]
     task_id: str
-    tool_use_id: Optional[str] = None
+    tool_use_id: str | None = None
     description: str
-    usage: Dict[str, Any] = Field(default_factory=dict)
-    last_tool_name: Optional[str] = None
-    summary: Optional[str] = None
+    usage: dict[str, Any] = Field(default_factory=dict)
+    last_tool_name: str | None = None
+    summary: str | None = None
     uuid: UUID4
     session_id: str
 
@@ -333,8 +333,8 @@ class SDKSessionStateChangedMessage(BaseModel):
 class SDKFilesPersistedEvent(BaseModel):
     type: Literal["system"]
     subtype: Literal["files_persisted"]
-    files: List[Dict[str, Any]] = Field(default_factory=list)
-    failed: List[Dict[str, Any]] = Field(default_factory=list)
+    files: list[dict[str, Any]] = Field(default_factory=list)
+    failed: list[dict[str, Any]] = Field(default_factory=list)
     processed_at: str
     uuid: UUID4
     session_id: str
@@ -343,7 +343,7 @@ class SDKFilesPersistedEvent(BaseModel):
 class SDKToolUseSummaryMessage(BaseModel):
     type: Literal["tool_use_summary"]
     summary: str
-    preceding_tool_use_ids: List[str] = Field(default_factory=list)
+    preceding_tool_use_ids: list[str] = Field(default_factory=list)
     uuid: UUID4
     session_id: str
 
@@ -375,13 +375,13 @@ class SDKSessionInfo(BaseModel):
     session_id: str = Field(alias="sessionId")
     summary: str
     last_modified: int = Field(alias="lastModified")
-    file_size: Optional[int] = Field(default=None, alias="fileSize")
-    custom_title: Optional[str] = Field(default=None, alias="customTitle")
-    first_prompt: Optional[str] = Field(default=None, alias="firstPrompt")
-    git_branch: Optional[str] = Field(default=None, alias="gitBranch")
-    cwd: Optional[str] = None
-    tag: Optional[str] = None
-    created_at: Optional[int] = Field(default=None, alias="createdAt")
+    file_size: int | None = Field(default=None, alias="fileSize")
+    custom_title: str | None = Field(default=None, alias="customTitle")
+    first_prompt: str | None = Field(default=None, alias="firstPrompt")
+    git_branch: str | None = Field(default=None, alias="gitBranch")
+    cwd: str | None = None
+    tag: str | None = None
+    created_at: int | None = Field(default=None, alias="createdAt")
 
     class Config:
         populate_by_name = True
@@ -413,5 +413,5 @@ SDKMessage = Union[
     SDKRateLimitEvent,
     SDKElicitationCompleteMessage,
     SDKPromptSuggestionMessage,
-    Dict[str, Any],
+    dict[str, Any],
 ]

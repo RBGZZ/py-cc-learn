@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import functools
+import os as _os
 import sys
-from typing import Dict, List, Optional, Tuple
 
 from server.utils.log import log_error
 
 Platform = str  # 'macos' | 'windows' | 'wsl' | 'linux' | 'unknown'
 
-SUPPORTED_PLATFORMS: List[Platform] = ["macos", "wsl"]
+SUPPORTED_PLATFORMS: list[Platform] = ["macos", "wsl"]
 
 
 @functools.lru_cache(maxsize=1)
@@ -24,10 +24,7 @@ def get_platform() -> Platform:
             try:
                 with open("/proc/version", encoding="utf-8") as f:
                     proc_version = f.read()
-                if (
-                    "microsoft" in proc_version.lower()
-                    or "wsl" in proc_version.lower()
-                ):
+                if "microsoft" in proc_version.lower() or "wsl" in proc_version.lower():
                     return "wsl"
             except Exception as error:
                 log_error(error)
@@ -41,7 +38,7 @@ def get_platform() -> Platform:
 
 
 @functools.lru_cache(maxsize=1)
-def get_wsl_version() -> Optional[str]:
+def get_wsl_version() -> str | None:
     if sys.platform != "linux":
         return None
     try:
@@ -66,9 +63,9 @@ def get_wsl_version() -> Optional[str]:
 class LinuxDistroInfo:
     def __init__(
         self,
-        linux_distro_id: Optional[str] = None,
-        linux_distro_version: Optional[str] = None,
-        linux_kernel: Optional[str] = None,
+        linux_distro_id: str | None = None,
+        linux_distro_version: str | None = None,
+        linux_kernel: str | None = None,
     ) -> None:
         self.linux_distro_id = linux_distro_id
         self.linux_distro_version = linux_distro_version
@@ -76,7 +73,7 @@ class LinuxDistroInfo:
 
 
 @functools.lru_cache(maxsize=1)
-def get_linux_distro_info() -> Optional[LinuxDistroInfo]:
+def get_linux_distro_info() -> LinuxDistroInfo | None:
     if sys.platform != "linux":
         return None
 
@@ -103,7 +100,7 @@ def get_linux_distro_info() -> Optional[LinuxDistroInfo]:
     return result
 
 
-VCS_MARKERS: List[Tuple[str, str]] = [
+VCS_MARKERS: list[tuple[str, str]] = [
     (".git", "git"),
     (".hg", "mercurial"),
     (".svn", "svn"),
@@ -115,7 +112,7 @@ VCS_MARKERS: List[Tuple[str, str]] = [
 ]
 
 
-def detect_vcs(directory: Optional[str] = None) -> List[str]:
+def detect_vcs(directory: str | None = None) -> list[str]:
     import os as _os
 
     detected: set[str] = set()
@@ -149,3 +146,24 @@ def is_wsl() -> bool:
 
 def is_linux() -> bool:
     return get_platform() == "linux"
+
+
+def is_msys() -> bool:
+    return bool(_os.environ.get("MSYSTEM"))
+
+
+def is_cygwin() -> bool:
+    ostype = _os.environ.get("OSTYPE", "")
+    return "cygwin" in ostype.lower()
+
+
+def get_windows_subtype() -> str:
+    if is_wsl():
+        return "wsl"
+    if is_msys():
+        return "msys"
+    if is_cygwin():
+        return "cygwin"
+    if is_windows():
+        return "native"
+    return "none"

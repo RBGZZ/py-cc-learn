@@ -5,16 +5,16 @@ import os
 import sys
 import traceback
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import structlog
 
 # === In-memory error log ===
 MAX_IN_MEMORY_ERRORS = 100
-_in_memory_error_log: List[Dict[str, str]] = []
+_in_memory_error_log: list[dict[str, str]] = []
 
 
 class ErrorLogSink:
@@ -25,8 +25,8 @@ class ErrorLogSink:
         return ""
 
 
-_error_log_sink: Optional[ErrorLogSink] = None
-_error_queue: List[Dict[str, Any]] = []
+_error_log_sink: ErrorLogSink | None = None
+_error_queue: list[dict[str, Any]] = []
 
 
 def attach_error_log_sink(sink: ErrorLogSink) -> None:
@@ -43,7 +43,7 @@ def attach_error_log_sink(sink: ErrorLogSink) -> None:
                 sink.log_error(event["error"])
 
 
-def get_in_memory_errors() -> List[Dict[str, str]]:
+def get_in_memory_errors() -> list[dict[str, str]]:
     return list(_in_memory_error_log)
 
 
@@ -65,8 +65,8 @@ _initialized = False
 
 
 def _add_request_id(
-    logger: logging.Logger, method_name: str, event_dict: Dict[str, Any]
-) -> Dict[str, Any]:
+    logger: logging.Logger, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
     ctx = structlog.contextvars.get_contextvars()
     request_id = ctx.get("request_id")
     if request_id:
@@ -75,15 +75,15 @@ def _add_request_id(
 
 
 def _drop_color_message(
-    logger: logging.Logger, method_name: str, event_dict: Dict[str, Any]
-) -> Dict[str, Any]:
+    logger: logging.Logger, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
     event_dict.pop("color_message", None)
     return event_dict
 
 
 def setup_logging(
     log_level: str = "INFO",
-    log_dir: Optional[Path] = None,
+    log_dir: Path | None = None,
 ) -> None:
     global _initialized
     if _initialized:
@@ -94,7 +94,7 @@ def setup_logging(
 
     timestamper = structlog.processors.TimeStamper(fmt="iso")
 
-    shared_processors: List[Any] = [
+    shared_processors: list[Any] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
@@ -137,9 +137,7 @@ def setup_logging(
 
     console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(getattr(logging, log_level.upper(), logging.INFO))
-    console_formatter = logging.Formatter(
-        "%(message)s"
-    )
+    console_formatter = logging.Formatter("%(message)s")
     console_handler.setFormatter(console_formatter)
     root_logger.addHandler(console_handler)
 
@@ -151,9 +149,7 @@ def setup_logging(
         encoding="utf-8",
     )
     file_handler.setLevel(getattr(logging, log_level.upper(), logging.INFO))
-    file_formatter = logging.Formatter(
-        "%(message)s"
-    )
+    file_formatter = logging.Formatter("%(message)s")
     file_handler.setFormatter(file_formatter)
     root_logger.addHandler(file_handler)
 
@@ -165,6 +161,7 @@ def get_logger(name: str = "py-cc") -> Any:
 
 
 # === Error logging ===
+
 
 def log_error(error: Any) -> None:
     if isinstance(error, Exception):
@@ -183,13 +180,15 @@ def log_error(error: Any) -> None:
         ):
             return
 
-        error_str = "".join(
-            traceback.format_exception(type(err), err, err.__traceback__)
-        ) if err.__traceback__ else str(err)
+        error_str = (
+            "".join(traceback.format_exception(type(err), err, err.__traceback__))
+            if err.__traceback__
+            else str(err)
+        )
 
         error_info = {
             "error": error_str,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         if len(_in_memory_error_log) >= MAX_IN_MEMORY_ERRORS:
@@ -221,7 +220,7 @@ def get_request_id() -> str:
     return ctx.get("request_id", "unknown")
 
 
-def set_request_id(request_id: Optional[str] = None) -> str:
+def set_request_id(request_id: str | None = None) -> str:
     rid = request_id or str(uuid.uuid4())
     structlog.contextvars.bind_contextvars(request_id=rid)
     return rid

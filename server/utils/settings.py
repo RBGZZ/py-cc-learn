@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,7 +22,7 @@ class Settings(BaseSettings):
     )
 
     # --- Anthropic ---
-    anthropic_api_key: Optional[str] = Field(default=None)
+    anthropic_api_key: str | None = Field(default=None)
     anthropic_base_url: str = Field(default="https://api.anthropic.com")
     anthropic_model: str = Field(default="claude-sonnet-4-20250514")
     anthropic_default_haiku_model: str = Field(default="claude-3-5-haiku-20241022")
@@ -31,15 +30,15 @@ class Settings(BaseSettings):
     anthropic_default_sonnet_model: str = Field(default="claude-sonnet-4-20250514")
 
     # --- OpenAI ---
-    openai_api_key: Optional[str] = Field(default=None)
+    openai_api_key: str | None = Field(default=None)
     openai_model: str = Field(default="gpt-4o")
 
     # --- DeepSeek ---
-    deepseek_api_key: Optional[str] = Field(default=None)
-    deepseek_model: str = Field(default="deepseek-chat")
+    deepseek_api_key: str | None = Field(default=None)
+    deepseek_model: str = Field(default="deepseek-v4-flash")
 
     # --- Google ---
-    google_api_key: Optional[str] = Field(default=None)
+    google_api_key: str | None = Field(default=None)
     google_model: str = Field(default="gemini-2.0-flash")
 
     # --- API ---
@@ -78,7 +77,7 @@ class Settings(BaseSettings):
         return v
 
 
-_settings: Optional[Settings] = None
+_settings: Settings | None = None
 
 
 def get_settings() -> Settings:

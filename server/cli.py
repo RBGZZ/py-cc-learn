@@ -6,7 +6,6 @@ from typing import Any
 import click
 import httpx
 
-
 VERSION = "0.1.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
@@ -15,7 +14,9 @@ DEFAULT_PORT = 8000
 @click.command()
 @click.version_option(version=VERSION, prog_name="haha")
 @click.option("--model", "-m", default=None, help="Model name to use for this session")
-@click.option("--resume", "-r", "resume_session_id", default=None, help="Resume a previous session by ID")
+@click.option(
+    "--resume", "-r", "resume_session_id", default=None, help="Resume a previous session by ID"
+)
 @click.option("--cwd", "-C", default=None, help="Working directory for the session")
 @click.option("--host", "-h", default=DEFAULT_HOST, help="FastAPI server host")
 @click.option("--port", "-p", default=DEFAULT_PORT, help="FastAPI server port")
@@ -43,7 +44,9 @@ def main(
         user_prompt = _read_stdin()
 
     if not user_prompt:
-        click.echo("No prompt provided. Provide a prompt via --prompt, arguments, or stdin.", err=True)
+        click.echo(
+            "No prompt provided. Provide a prompt via --prompt, arguments, or stdin.", err=True
+        )
         sys.exit(1)
 
     _run_streaming_chat(
@@ -141,6 +144,7 @@ def _run_streaming_chat(
                     buffer = ""
                     try:
                         import json
+
                         data = json.loads(data_str)
                         _render_event(data)
                     except json.JSONDecodeError:
@@ -170,7 +174,7 @@ def _render_event(event: dict[str, Any]) -> None:
         click.echo(f"\n[tool: {tool_name}]", err=True)
 
     elif event_type == "tool_result":
-        click.echo(f"\n[tool result]", err=True)
+        click.echo("\n[tool result]", err=True)
 
     elif event_type == "error":
         error_msg = event.get("data", {}).get("message", event.get("message", "unknown error"))
@@ -183,7 +187,10 @@ def _render_event(event: dict[str, Any]) -> None:
         if stop_reason:
             click.echo(f"\n[result: {stop_reason}]", err=True)
         if usage:
-            click.echo(f"[usage: in={usage.get('input_tokens', 0)} out={usage.get('output_tokens', 0)}]", err=True)
+            click.echo(
+                f"[usage: in={usage.get('input_tokens', 0)} out={usage.get('output_tokens', 0)}]",
+                err=True,
+            )
 
     elif event_type == "message":
         pass

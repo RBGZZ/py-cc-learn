@@ -78,23 +78,26 @@ def _validate_prompt(prompt: str) -> None:
     stripped = prompt.strip()
     if not stripped:
         raise ValueError("prompt must not be empty")
-    if all(c in "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f"
-           "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
-           "\x7f" for c in stripped):
+    if all(
+        c in "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f"
+        "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
+        "\x7f"
+        for c in stripped
+    ):
         raise ValueError("prompt must not consist entirely of control characters")
 
 
 def _get_tools():
-    from server.tools.registry import assemble_tool_pool
     from server.tools.bash_tool import BashTool
+    from server.tools.file_edit_tool import FileEditTool
     from server.tools.file_read_tool import FileReadTool
     from server.tools.file_write_tool import FileWriteTool
-    from server.tools.file_edit_tool import FileEditTool
     from server.tools.glob_tool import GlobTool
     from server.tools.grep_tool import GrepTool
+    from server.tools.registry import assemble_tool_pool
     from server.tools.todo_write_tool import TodoWriteTool
-    from server.tools.web_search_tool import WebSearchTool
     from server.tools.web_fetch_tool import WebFetchTool
+    from server.tools.web_search_tool import WebSearchTool
 
     builtins = [
         BashTool(),
@@ -166,7 +169,6 @@ async def lifespan(app: FastAPI):
 
 
 async def _graceful_shutdown(app: FastAPI) -> None:
-    from server.state.session import SessionStorage
     from server.utils.log import get_logger
 
     log = get_logger("shutdown")
@@ -218,7 +220,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
-    from server.utils.log import set_request_id, clear_request_id
+    from server.utils.log import clear_request_id, set_request_id
 
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     set_request_id(request_id)
@@ -270,7 +272,10 @@ async def prompt_validation_middleware(request: Request, call_next):
                 except json.JSONDecodeError:
                     return JSONResponse(
                         status_code=422,
-                        content={"error": "invalid_json", "message": "Request body must be valid JSON"},
+                        content={
+                            "error": "invalid_json",
+                            "message": "Request body must be valid JSON",
+                        },
                     )
                 prompt = data.get("prompt", "")
                 if not prompt or not prompt.strip():
@@ -281,16 +286,23 @@ async def prompt_validation_middleware(request: Request, call_next):
                 if len(prompt) > MAX_PROMPT_CHARS:
                     return JSONResponse(
                         status_code=422,
-                        content={"error": "prompt_too_long",
-                                 "message": f"prompt must be at most {MAX_PROMPT_CHARS} characters"},
+                        content={
+                            "error": "prompt_too_long",
+                            "message": f"prompt must be at most {MAX_PROMPT_CHARS} characters",
+                        },
                     )
-                if all(c in "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f"
-                       "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
-                       "\x7f" for c in prompt.strip()):
+                if all(
+                    c in "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f"
+                    "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
+                    "\x7f"
+                    for c in prompt.strip()
+                ):
                     return JSONResponse(
                         status_code=422,
-                        content={"error": "control_chars_only",
-                                 "message": "prompt must not consist entirely of control characters"},
+                        content={
+                            "error": "control_chars_only",
+                            "message": "prompt must not consist entirely of control characters",
+                        },
                     )
             request._body = body
         except Exception:
@@ -321,6 +333,7 @@ async def status():
     docker_available = False
     try:
         from server.sandbox.manager import is_docker_available
+
         docker_available = is_docker_available()
     except Exception:
         pass
@@ -367,8 +380,8 @@ async def chat(request: Request):
     provider = None
     try:
         from server.services.provider_factory import ProviderFactory
-        factory = ProviderFactory.get_instance()
-        provider = factory.get_provider()
+
+        provider = ProviderFactory.get_provider()
         if chat_req.model and provider:
             provider.config.model = chat_req.model
     except Exception as exc:
@@ -379,15 +392,17 @@ async def chat(request: Request):
     from server.engine.query_engine import QueryEngine, QueryEngineConfig
     from server.state.session import SessionStorage
 
-    engine = QueryEngine(QueryEngineConfig(
-        cwd=os.getcwd(),
-        tools=tools,
-        provider=provider,
-        system_prompt="You are a helpful AI coding assistant.",
-        max_turns=50,
-        session_storage=SessionStorage(session_id=session_id),
-        abort_signal=cancel_event,
-    ))
+    engine = QueryEngine(
+        QueryEngineConfig(
+            cwd=os.getcwd(),
+            tools=tools,
+            provider=provider,
+            system_prompt="You are a helpful AI coding assistant.",
+            max_turns=50,
+            session_storage=SessionStorage(session_id=session_id),
+            abort_signal=cancel_event,
+        )
+    )
 
     await register_session(session_id, engine, cancel_event)
 
@@ -396,7 +411,7 @@ async def chat(request: Request):
         try:
             async for event in engine.submit_message(chat_req.prompt):
                 if cancel_event.is_set():
-                    yield f"event: error\ndata: {{\"stop_reason\": \"cancelled_by_user\"}}\n\n"
+                    yield 'event: error\ndata: {"stop_reason": "cancelled_by_user"}\n\n'
                     return
 
                 event_type = event.get("type", "")
@@ -419,10 +434,10 @@ async def chat(request: Request):
                 await asyncio.sleep(0)
 
         except asyncio.CancelledError:
-            yield f"event: error\ndata: {{\"stop_reason\": \"cancelled_by_user\"}}\n\n"
+            yield 'event: error\ndata: {"stop_reason": "cancelled_by_user"}\n\n'
         except Exception as exc:
             log.error("chat_stream_error", error=str(exc))
-            yield f"event: error\ndata: {{\"stop_reason\": \"error\", \"message\": \"{_json_escape(str(exc))}\"}}\n\n"
+            yield f'event: error\ndata: {{"stop_reason": "error", "message": "{_json_escape(str(exc))}"}}\n\n'
         finally:
             await unregister_session(session_id)
 
@@ -447,30 +462,36 @@ async def stop_session(session_id: str):
         return {"stopped": True, "session_id": session_id, "message": "Session stopped"}
     return JSONResponse(
         status_code=404,
-        content={"stopped": False, "session_id": session_id, "message": "Session not found or already completed"},
+        content={
+            "stopped": False,
+            "session_id": session_id,
+            "message": "Session not found or already completed",
+        },
     )
 
 
 @app.post("/api/v1/upload/image", response_model=UploadImageResponse)
 async def upload_image(file: UploadFile):
+    from server.exceptions import ImageResizeError, ImageSizeError
     from server.utils.log import get_logger
 
     log = get_logger("upload")
 
     if not file.content_type or not file.content_type.startswith("image/"):
-        return JSONResponse(status_code=415, content={"error": "unsupported_media_type",
-                                                       "message": "Only image files are accepted"})
+        return JSONResponse(
+            status_code=415,
+            content={"error": "unsupported_media_type", "message": "Only image files are accepted"},
+        )
 
     contents = await file.read()
     size = len(contents)
 
-    if size > MAX_IMAGE_SIZE_BYTES:
-        return JSONResponse(status_code=413, content={"error": "image_too_large",
-                                                       "message": f"Image must be ≤ 5MB, got {size} bytes"})
-
     if size == 0:
-        return JSONResponse(status_code=422, content={"error": "empty_image",
-                                                       "message": "Image file is empty"})
+        return JSONResponse(
+            status_code=422, content={"error": "empty_image", "message": "Image file is empty"}
+        )
+
+    MAX_DIM = 2048
 
     try:
         from PIL import Image
@@ -479,23 +500,34 @@ async def upload_image(file: UploadFile):
         width, height = img.size
         fmt = img.format or "PNG"
 
+        needs_resize = False
         if size > MAX_IMAGE_SIZE_BYTES:
-            max_dim = 2048
-            if width > max_dim or height > max_dim:
-                ratio = min(max_dim / width, max_dim / height)
+            needs_resize = True
+        if width > MAX_DIM or height > MAX_DIM:
+            needs_resize = True
+
+        if needs_resize:
+            try:
+                ratio = min(MAX_DIM / width, MAX_DIM / height, 1.0)
                 new_w, new_h = int(width * ratio), int(height * ratio)
                 img = img.resize((new_w, new_h), Image.LANCZOS)
                 buf = io.BytesIO()
-                img.save(buf, format=fmt)
+                save_format = fmt if fmt in ("PNG", "JPEG", "GIF", "WEBP") else "PNG"
+                img.save(buf, format=save_format)
                 contents = buf.getvalue()
                 size = len(contents)
                 width, height = new_w, new_h
+                fmt = save_format if save_format != fmt else fmt
+            except Exception as resize_exc:
+                raise ImageResizeError(
+                    f"Failed to resize image: {resize_exc}", resize_exc
+                ) from resize_exc
 
-                if size > MAX_IMAGE_SIZE_BYTES:
-                    return JSONResponse(status_code=413, content={"error": "image_too_large",
-                                                                   "message": "Image too large even after resize"})
+        if size > MAX_IMAGE_SIZE_BYTES:
+            raise ImageSizeError(size, MAX_IMAGE_SIZE_BYTES)
 
         import base64
+
         b64 = base64.b64encode(contents).decode("ascii")
 
         log.info("image_uploaded", width=width, height=height, size_bytes=size, format=fmt)
@@ -507,10 +539,24 @@ async def upload_image(file: UploadFile):
             "size_bytes": size,
             "format": fmt,
         }
+    except ImageSizeError:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "error": "image_too_large",
+                "message": f"Image must be ≤ 5MB, got {size} bytes",
+            },
+        )
+    except ImageResizeError as exc:
+        log.error("image_resize_error", error=str(exc))
+        return JSONResponse(
+            status_code=422, content={"error": "image_resize_failed", "message": str(exc)}
+        )
     except Exception as exc:
         log.error("image_processing_error", error=str(exc))
-        return JSONResponse(status_code=422, content={"error": "image_processing_failed",
-                                                       "message": str(exc)})
+        return JSONResponse(
+            status_code=422, content={"error": "image_processing_failed", "message": str(exc)}
+        )
 
 
 if STATIC_DIR.exists() and STATIC_DIR.is_dir():

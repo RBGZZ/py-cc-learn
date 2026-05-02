@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import tiktoken
 
@@ -27,9 +27,7 @@ def count_tokens(text: str, model: str = "cl100k_base") -> int:
     return len(encoding.encode(text))
 
 
-def count_tokens_for_messages(
-    messages: List[Dict[str, Any]], model: str = "cl100k_base"
-) -> int:
+def count_tokens_for_messages(messages: list[dict[str, Any]], model: str = "cl100k_base") -> int:
     encoding = _get_encoding_for_model(model)
     total = 0
     for msg in messages:
@@ -45,7 +43,7 @@ def count_tokens_for_messages(
     return total
 
 
-def get_token_usage(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def get_token_usage(message: dict[str, Any]) -> dict[str, Any] | None:
     if message.get("type") != "assistant":
         return None
     if "usage" not in message.get("message", {}):
@@ -63,7 +61,7 @@ def get_token_usage(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return message["message"]["usage"]
 
 
-def _get_assistant_message_id(message: Dict[str, Any]) -> Optional[str]:
+def _get_assistant_message_id(message: dict[str, Any]) -> str | None:
     if message.get("type") != "assistant":
         return None
     if "id" not in message.get("message", {}):
@@ -73,7 +71,7 @@ def _get_assistant_message_id(message: Dict[str, Any]) -> Optional[str]:
     return message["message"]["id"]
 
 
-def get_assistant_message_content_length(message: Dict[str, Any]) -> int:
+def get_assistant_message_content_length(message: dict[str, Any]) -> int:
     content_length = 0
     for block in message.get("message", {}).get("content", []):
         if not isinstance(block, dict):
@@ -90,7 +88,7 @@ def get_assistant_message_content_length(message: Dict[str, Any]) -> int:
     return content_length
 
 
-def get_token_count_from_usage(usage: Dict[str, Any]) -> int:
+def get_token_count_from_usage(usage: dict[str, Any]) -> int:
     return (
         usage.get("input_tokens", 0)
         + usage.get("cache_creation_input_tokens", 0)
@@ -100,7 +98,7 @@ def get_token_count_from_usage(usage: Dict[str, Any]) -> int:
 
 
 def token_count_from_last_api_response(
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
 ) -> int:
     for msg in reversed(messages):
         usage = get_token_usage(msg)
@@ -110,7 +108,7 @@ def token_count_from_last_api_response(
 
 
 def final_context_tokens_from_last_response(
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
 ) -> int:
     for msg in reversed(messages):
         usage = get_token_usage(msg)
@@ -118,15 +116,13 @@ def final_context_tokens_from_last_response(
             iterations = usage.get("iterations")
             if iterations and len(iterations) > 0:
                 last_iter = iterations[-1]
-                return last_iter.get("input_tokens", 0) + last_iter.get(
-                    "output_tokens", 0
-                )
+                return last_iter.get("input_tokens", 0) + last_iter.get("output_tokens", 0)
             return usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
     return 0
 
 
 def message_token_count_from_last_api_response(
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
 ) -> int:
     for msg in reversed(messages):
         usage = get_token_usage(msg)
@@ -136,38 +132,34 @@ def message_token_count_from_last_api_response(
 
 
 def get_current_usage(
-    messages: List[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
+    messages: list[dict[str, Any]],
+) -> dict[str, Any] | None:
     for msg in reversed(messages):
         usage = get_token_usage(msg)
         if usage:
             return {
                 "input_tokens": usage.get("input_tokens", 0),
                 "output_tokens": usage.get("output_tokens", 0),
-                "cache_creation_input_tokens": usage.get(
-                    "cache_creation_input_tokens", 0
-                ),
+                "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0),
                 "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
             }
     return None
 
 
 def does_most_recent_assistant_message_exceed_200k(
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
 ) -> bool:
-    THRESHOLD = 200_000
+    _threshold = 200_000
     for msg in reversed(messages):
         if msg.get("type") == "assistant":
             usage = get_token_usage(msg)
             if usage:
-                return get_token_count_from_usage(usage) > THRESHOLD
+                return get_token_count_from_usage(usage) > _threshold
             return False
     return False
 
 
-def token_count_with_estimation(
-    messages: List[Dict[str, Any]], model: str = "cl100k_base"
-) -> int:
+def token_count_with_estimation(messages: list[dict[str, Any]], model: str = "cl100k_base") -> int:
     for i in range(len(messages) - 1, -1, -1):
         msg = messages[i]
         usage = get_token_usage(msg)

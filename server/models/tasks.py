@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import os
-import secrets
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 TASK_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
-TASK_ID_PREFIXES: Dict[str, str] = {
+TASK_ID_PREFIXES: dict[str, str] = {
     "local_bash": "b",
     "local_agent": "a",
     "remote_agent": "r",
@@ -55,10 +54,10 @@ class TaskStateBase(BaseModel):
     type: TaskType
     status: TaskStatus = TaskStatus.PENDING
     description: str
-    tool_use_id: Optional[str] = None
+    tool_use_id: str | None = None
     start_time: int = 0
-    end_time: Optional[int] = None
-    total_paused_ms: Optional[int] = None
+    end_time: int | None = None
+    total_paused_ms: int | None = None
     output_file: str = ""
     output_offset: int = 0
     notified: bool = False
@@ -68,7 +67,7 @@ def create_task_state_base(
     task_id: str,
     task_type: TaskType,
     description: str,
-    tool_use_id: Optional[str] = None,
+    tool_use_id: str | None = None,
 ) -> TaskStateBase:
     import time
 
@@ -87,7 +86,7 @@ def create_task_state_base(
 
 class TaskHandle(BaseModel):
     task_id: str
-    cleanup: Optional[Any] = None
+    cleanup: Any | None = None
 
 
 class TaskContext(BaseModel):
@@ -110,7 +109,7 @@ class Task(BaseModel):
 class LocalShellSpawnInput(BaseModel):
     command: str
     description: str
-    timeout: Optional[int] = None
-    tool_use_id: Optional[str] = None
-    agent_id: Optional[str] = None
-    kind: Optional[str] = None
+    timeout: int | None = None
+    tool_use_id: str | None = None
+    agent_id: str | None = None
+    kind: str | None = None

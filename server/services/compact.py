@@ -14,9 +14,18 @@ TIME_BASED_MC_CLEARED_MESSAGE = "[Old tool result content cleared]"
 IMAGE_MAX_TOKEN_SIZE = 2000
 
 COMPACTABLE_TOOL_NAMES = {
-    "fileread", "read", "bash", "shell",
-    "grep", "glob", "websearch", "webfetch",
-    "fileedit", "edit", "filewrite", "write",
+    "fileread",
+    "read",
+    "bash",
+    "shell",
+    "grep",
+    "glob",
+    "websearch",
+    "webfetch",
+    "fileedit",
+    "edit",
+    "filewrite",
+    "write",
 }
 
 # === Auto-Compact Constants ===
@@ -170,8 +179,10 @@ def _calculate_tool_result_tokens(block: dict[str, Any]) -> int:
         return rough_token_count(content)
     if isinstance(content, list):
         return sum(
-            rough_token_count(item.get("text", "")) if isinstance(item, dict) and item.get("type") == "text"
-            else IMAGE_MAX_TOKEN_SIZE if isinstance(item, dict) and item.get("type") in ("image", "document")
+            rough_token_count(item.get("text", ""))
+            if isinstance(item, dict) and item.get("type") == "text"
+            else IMAGE_MAX_TOKEN_SIZE
+            if isinstance(item, dict) and item.get("type") in ("image", "document")
             else 0
             for item in content
         )
@@ -335,9 +346,7 @@ def calculate_token_warning_state(
 
     is_above_warning = token_usage >= warning_threshold
     is_above_error = token_usage >= error_threshold
-    is_above_auto_compact = (
-        is_auto_compact_enabled() and token_usage >= auto_compact_threshold
-    )
+    is_above_auto_compact = is_auto_compact_enabled() and token_usage >= auto_compact_threshold
 
     blocking_limit = effective_window - MANUAL_COMPACT_BUFFER_TOKENS
     env_override = os.environ.get("CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE")
@@ -394,9 +403,7 @@ async def auto_compact_if_needed(
 
     model = tool_use_context.get("options", {}).get("main_loop_model", "claude-sonnet-4-20250514")
 
-    should_compact = await should_auto_compact(
-        messages, model, query_source, snip_tokens_freed
-    )
+    should_compact = await should_auto_compact(messages, model, query_source, snip_tokens_freed)
 
     if not should_compact:
         return {"was_compacted": False}
@@ -408,9 +415,7 @@ async def auto_compact_if_needed(
             "message": {"role": "user", "content": compact_prompt},
         }
 
-        summary = await _stream_compact_summary(
-            messages, summary_request, tool_use_context, model
-        )
+        summary = await _stream_compact_summary(messages, summary_request, tool_use_context, model)
 
         if not summary:
             raise Exception("Failed to generate conversation summary")
@@ -434,7 +439,7 @@ async def auto_compact_if_needed(
         }
 
         return compact_result
-    except Exception as e:
+    except Exception:
         prev_failures = tracking.get("consecutive_failures", 0) if tracking else 0
         next_failures = prev_failures + 1
         return {"was_compacted": False, "consecutive_failures": next_failures}
@@ -452,11 +457,7 @@ def create_post_compact_file_attachments(
     preserved_paths = _collect_read_file_paths(preserved_messages or [])
 
     recent_files = sorted(
-        [
-            {"filename": f, **s}
-            for f, s in read_file_state.items()
-            if f not in preserved_paths
-        ],
+        [{"filename": f, **s} for f, s in read_file_state.items() if f not in preserved_paths],
         key=lambda x: x.get("timestamp", 0),
         reverse=True,
     )[:max_files]
@@ -471,14 +472,16 @@ def create_post_compact_file_attachments(
         tokens_for_attachment = min(file_tokens, POST_COMPACT_MAX_TOKENS_PER_FILE)
 
         if used_tokens + tokens_for_attachment <= token_budget:
-            attachments.append({
-                "type": "attachment",
-                "attachment": {
-                    "type": "file_reference",
-                    "filename": file_info["filename"],
-                    "content": content[:POST_COMPACT_MAX_TOKENS_PER_FILE * 4],
-                },
-            })
+            attachments.append(
+                {
+                    "type": "attachment",
+                    "attachment": {
+                        "type": "file_reference",
+                        "filename": file_info["filename"],
+                        "content": content[: POST_COMPACT_MAX_TOKENS_PER_FILE * 4],
+                    },
+                }
+            )
             used_tokens += tokens_for_attachment
         else:
             break
@@ -497,7 +500,10 @@ def _collect_read_file_paths(messages: list[dict[str, Any]]) -> set[str]:
         for block in content:
             if not isinstance(block, dict):
                 continue
-            if block.get("type") != "tool_use" or block.get("name", "").lower() not in ("fileread", "read"):
+            if block.get("type") != "tool_use" or block.get("name", "").lower() not in (
+                "fileread",
+                "read",
+            ):
                 continue
             input_data = block.get("input", {})
             if isinstance(input_data, dict) and "file_path" in input_data:
@@ -518,6 +524,7 @@ def get_compact_prompt(custom_instructions: str | None = None) -> str:
 
 def format_compact_summary(summary: str) -> str:
     import re
+
     formatted = summary
 
     formatted = re.sub(r"<analysis>[\s\S]*?</analysis>", "", formatted)
@@ -556,10 +563,10 @@ def get_compact_user_summary_message(
 
     if suppress_follow_up_questions:
         base += (
-            f"\nContinue the conversation from where it left off without asking the user any "
-            f"further questions. Resume directly — do not acknowledge the summary, do not recap "
-            f"what was happening, do not preface with \"I'll continue\" or similar. Pick up the "
-            f"last task as if the break never happened."
+            "\nContinue the conversation from where it left off without asking the user any "
+            "further questions. Resume directly — do not acknowledge the summary, do not recap "
+            'what was happening, do not preface with "I\'ll continue" or similar. Pick up the '
+            "last task as if the break never happened."
         )
 
     return base

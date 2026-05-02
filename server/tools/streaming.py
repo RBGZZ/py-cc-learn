@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import copy
+from collections.abc import AsyncGenerator, Callable, Generator
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Callable, Dict, Generator, List, Optional
+from typing import Any
 
-from server.tools.tool import Tool, Tools, find_tool_by_name
+from server.tools.tool import Tools, find_tool_by_name
 
 BASH_TOOL_NAME = "Bash"
 
@@ -20,10 +21,10 @@ STATUS_YIELDED = "yielded"
 class AbortController:
     """Python equivalent of TypeScript AbortController."""
 
-    def __init__(self, parent: Optional[AbortController] = None):
+    def __init__(self, parent: AbortController | None = None):
         self._event: asyncio.Event = asyncio.Event()
-        self.reason: Optional[str] = None
-        self.parent: Optional[AbortController] = parent
+        self.reason: str | None = None
+        self.parent: AbortController | None = parent
 
     @property
     def signal(self) -> asyncio.Event:
@@ -33,7 +34,7 @@ class AbortController:
     def aborted(self) -> bool:
         return self._event.is_set()
 
-    def abort(self, reason: Optional[str] = None) -> None:
+    def abort(self, reason: str | None = None) -> None:
         self.reason = reason
         self._event.set()
 
@@ -42,7 +43,7 @@ class AbortController:
 
 
 def create_child_abort_controller(
-    parent: Optional[AbortController],
+    parent: AbortController | None,
 ) -> AbortController:
     """Source: abortController.ts createChildAbortController."""
     return AbortController(parent=parent)
@@ -52,7 +53,7 @@ def create_child_abort_controller(
 class ToolUseBlock:
     id: str
     name: str
-    input: Dict[str, Any] = field(default_factory=dict)
+    input: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -76,7 +77,7 @@ class ProgressMessage:
 
 
 Message = Any
-MessageUpdate = Dict[str, Any]
+MessageUpdate = dict[str, Any]
 
 ToolStatus = str
 
@@ -84,19 +85,20 @@ ToolStatus = str
 @dataclass
 class TrackedTool:
     """Source: StreamingToolExecutor.ts L21-32."""
+
     id: str
     block: ToolUseBlock
     assistant_message: AssistantMessage
     status: ToolStatus = STATUS_QUEUED
     is_concurrency_safe: bool = False
-    promise: Optional[asyncio.Task] = None
-    results: Optional[List[Message]] = None
-    pending_progress: List[Message] = field(default_factory=list)
-    context_modifiers: Optional[List[Callable]] = None
+    promise: asyncio.Task | None = None
+    results: list[Message] | None = None
+    pending_progress: list[Message] = field(default_factory=list)
+    context_modifiers: list[Callable] | None = None
 
 
 def _create_user_message(
-    content: List[Dict[str, Any]],
+    content: list[dict[str, Any]],
     tool_use_result: str,
     source_tool_assistant_uuid: str,
 ) -> UserMessage:
@@ -110,7 +112,7 @@ def _create_user_message(
 
 
 class UserMessageContent:
-    def __init__(self, type: str, content: List[Dict[str, Any]]):
+    def __init__(self, type: str, content: list[dict[str, Any]]):
         self.type = type
         self.content = content
 
@@ -134,18 +136,18 @@ class StreamingToolExecutor:
         self._tool_definitions: Tools = tool_definitions
         self._can_use_tool: Callable = can_use_tool
         self._tool_use_context: Any = tool_use_context
-        self._tools: List[TrackedTool] = []
+        self._tools: list[TrackedTool] = []
         self._has_errored: bool = False
         self._errored_tool_description: str = ""
         self._discarded: bool = False
-        self._progress_available_resolve: Optional[Callable[[], None]] = None
+        self._progress_available_resolve: Callable[[], None] | None = None
 
         parent_abort = getattr(tool_use_context, "abort_controller", None)
         self._sibling_abort_controller: AbortController = create_child_abort_controller(
             parent_abort
         )
 
-        self._run_tool_use_fn: Optional[Callable] = None
+        self._run_tool_use_fn: Callable | None = None
 
     def set_run_tool_use_fn(self, fn: Callable) -> None:
         """
@@ -166,12 +168,8 @@ class StreamingToolExecutor:
     ) -> Any:
         """Hook for running tool use. Must be set via set_run_tool_use_fn before tools execute."""
         if self._run_tool_use_fn is not None:
-            return self._run_tool_use_fn(
-                block, assistant_message, can_use_tool, tool_use_context
-            )
-        raise NotImplementedError(
-            "run_tool_use_fn must be set before tools execute"
-        )
+            return self._run_tool_use_fn(block, assistant_message, can_use_tool, tool_use_context)
+        raise NotImplementedError("run_tool_use_fn must be set before tools execute")
 
     def discard(self) -> None:
         """
@@ -247,9 +245,7 @@ class StreamingToolExecutor:
         executing_tools = [t for t in self._tools if t.status == STATUS_EXECUTING]
         if not executing_tools:
             return True
-        if is_concurrency_safe and all(
-            t.is_concurrency_safe for t in executing_tools
-        ):
+        if is_concurrency_safe and all(t.is_concurrency_safe for t in executing_tools):
             return True
         return False
 
@@ -280,9 +276,7 @@ class StreamingToolExecutor:
             or ""
         )
         if isinstance(summary, str) and len(summary) > 0:
-            truncated = (
-                summary[:40] + "\u2026" if len(summary) > 40 else summary
-            )
+            truncated = summary[:40] + "\u2026" if len(summary) > 40 else summary
             return f"{tool.block.name}({truncated})"
         return tool.block.name
 
@@ -299,9 +293,7 @@ class StreamingToolExecutor:
             pass
         return "block"
 
-    def _get_abort_reason(
-        self, tool: TrackedTool
-    ) -> Optional[str]:
+    def _get_abort_reason(self, tool: TrackedTool) -> str | None:
         """
         Determine why a tool should be cancelled.
         Source: L210-231.
@@ -311,9 +303,7 @@ class StreamingToolExecutor:
         if self._has_errored:
             return "sibling_error"
 
-        parent_abort = getattr(
-            self._tool_use_context, "abort_controller", None
-        )
+        parent_abort = getattr(self._tool_use_context, "abort_controller", None)
         if parent_abort is not None and parent_abort.aborted:
             if parent_abort.reason == "interrupt":
                 behavior = self._get_tool_interrupt_behavior(tool)
@@ -380,16 +370,11 @@ class StreamingToolExecutor:
     def _update_interruptible_state(self) -> None:
         """Source: L254-260."""
         executing = [t for t in self._tools if t.status == STATUS_EXECUTING]
-        set_has = getattr(
-            self._tool_use_context, "set_has_interruptible_tool_in_progress", None
-        )
+        set_has = getattr(self._tool_use_context, "set_has_interruptible_tool_in_progress", None)
         if set_has is not None:
             set_has(
                 len(executing) > 0
-                and all(
-                    self._get_tool_interrupt_behavior(t) == "cancel"
-                    for t in executing
-                )
+                and all(self._get_tool_interrupt_behavior(t) == "cancel" for t in executing)
             )
 
     async def _execute_tool(self, tool: TrackedTool) -> None:
@@ -399,16 +384,14 @@ class StreamingToolExecutor:
         """
         tool.status = STATUS_EXECUTING
 
-        set_in_progress = getattr(
-            self._tool_use_context, "set_in_progress_tool_use_ids", None
-        )
+        set_in_progress = getattr(self._tool_use_context, "set_in_progress_tool_use_ids", None)
         if set_in_progress is not None:
             set_in_progress(lambda prev: set(prev) | {tool.id})
 
         self._update_interruptible_state()
 
-        messages: List[Message] = []
-        context_modifiers: List[Callable] = []
+        messages: list[Message] = []
+        context_modifiers: list[Callable] = []
 
         async def collect_results() -> None:
             nonlocal messages, context_modifiers
@@ -428,15 +411,11 @@ class StreamingToolExecutor:
                 self._update_interruptible_state()
                 return
 
-            tool_abort_controller = create_child_abort_controller(
-                self._sibling_abort_controller
-            )
+            tool_abort_controller = create_child_abort_controller(self._sibling_abort_controller)
 
             async def on_abort() -> None:
                 await tool_abort_controller.wait()
-                parent_abort = getattr(
-                    self._tool_use_context, "abort_controller", None
-                )
+                parent_abort = getattr(self._tool_use_context, "abort_controller", None)
                 if (
                     tool_abort_controller.reason != "sibling_error"
                     and parent_abort is not None
@@ -490,12 +469,8 @@ class StreamingToolExecutor:
                         this_tool_errored = True
                         if tool.block.name == BASH_TOOL_NAME:
                             self._has_errored = True
-                            self._errored_tool_description = (
-                                self._get_tool_description(tool)
-                            )
-                            self._sibling_abort_controller.abort(
-                                "sibling_error"
-                            )
+                            self._errored_tool_description = self._get_tool_description(tool)
+                            self._sibling_abort_controller.abort("sibling_error")
 
                     if update_message is not None:
                         if getattr(update_message, "type", None) == "progress":
@@ -509,9 +484,7 @@ class StreamingToolExecutor:
 
                     context_modifier = update.get("context_modifier")
                     if context_modifier is not None:
-                        context_modifiers.append(
-                            context_modifier.get("modify_context")
-                        )
+                        context_modifiers.append(context_modifier.get("modify_context"))
 
             except Exception:
                 pass
@@ -530,9 +503,7 @@ class StreamingToolExecutor:
             if not tool.is_concurrency_safe and context_modifiers:
                 for modifier in context_modifiers:
                     if modifier is not None:
-                        self._tool_use_context = modifier(
-                            self._tool_use_context
-                        )
+                        self._tool_use_context = modifier(self._tool_use_context)
 
         tool.promise = asyncio.create_task(collect_results())
 
@@ -547,9 +518,7 @@ class StreamingToolExecutor:
 
     def _has_pending_progress(self) -> bool:
         """Source: L445-447."""
-        return any(
-            len(t.pending_progress) > 0 for t in self._tools
-        )
+        return any(len(t.pending_progress) > 0 for t in self._tools)
 
     def get_completed_results(self) -> Generator[MessageUpdate, None, None]:
         """
@@ -581,14 +550,9 @@ class StreamingToolExecutor:
                         "new_context": self._tool_use_context,
                     }
 
-                _mark_tool_use_as_complete(
-                    self._tool_use_context, tool.id
-                )
+                _mark_tool_use_as_complete(self._tool_use_context, tool.id)
 
-            elif (
-                tool.status == STATUS_EXECUTING
-                and not tool.is_concurrency_safe
-            ):
+            elif tool.status == STATUS_EXECUTING and not tool.is_concurrency_safe:
                 break
 
     def _has_completed_results(self) -> bool:
@@ -624,26 +588,21 @@ class StreamingToolExecutor:
                 and not self._has_pending_progress()
             ):
                 executing_tools = [
-                    t
-                    for t in self._tools
-                    if t.status == STATUS_EXECUTING and t.promise is not None
+                    t for t in self._tools if t.status == STATUS_EXECUTING and t.promise is not None
                 ]
                 executing_promises = [t.promise for t in executing_tools]  # type: ignore
 
                 progress_future: asyncio.Future = asyncio.get_event_loop().create_future()
 
-                def _resolve_progress() -> None:
-                    if not progress_future.done():
-                        progress_future.set_result(None)
+                def _resolve_progress(_fut: asyncio.Future = progress_future) -> None:
+                    if not _fut.done():
+                        _fut.set_result(None)
 
                 self._progress_available_resolve = _resolve_progress
 
                 if executing_promises:
                     await asyncio.wait(
-                        [
-                            asyncio.ensure_future(p)
-                            for p in executing_promises
-                        ]
+                        [asyncio.ensure_future(p) for p in executing_promises]
                         + [asyncio.ensure_future(progress_future)],
                         return_when=asyncio.FIRST_COMPLETED,
                     )
@@ -666,8 +625,6 @@ def _mark_tool_use_as_complete(
     """
     Source: L521-529.
     """
-    set_in_progress = getattr(
-        tool_use_context, "set_in_progress_tool_use_ids", None
-    )
+    set_in_progress = getattr(tool_use_context, "set_in_progress_tool_use_ids", None)
     if set_in_progress is not None:
         set_in_progress(lambda prev: set(prev) - {tool_use_id})
