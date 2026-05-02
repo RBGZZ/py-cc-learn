@@ -1,113 +1,265 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useChatStore } from '../stores/chat'
+import ChatMessage from './ChatMessage.vue'
+import LoadingSpinner from './LoadingSpinner.vue'
 
 const store = useChatStore()
 
+const MESSAGES_PER_PAGE = 50
+
+const messagesContainer = ref<HTMLDivElement | null>(null)
+const isScrolledUp = ref(false)
+const visibleCount = ref(MESSAGES_PER_PAGE)
+const isAutoScroll = ref(true)
+
 const hasMessages = computed(() => store.messages.length > 0)
+const totalMessages = computed(() => store.messages.length)
+
+// Virtual scrolling: only show last N messages
+const visibleMessages = computed(() => {
+  const all = store.messages
+  if (all.length <= visibleCount.value) return all
+  return all.slice(all.length - visibleCount.value)
+})
+
+const hasMoreMessages = computed(() => visibleMessages.value.length < store.messages.length)
+
+function loadMore(): void {
+  const prevCount = visibleCount.value
+  visibleCount.value = Math.min(visibleCount.value + MESSAGES_PER_PAGE, totalMessages.value)
+  // Maintain scroll position after loading older messages
+  nextTick(() => {
+    if (messagesContainer.value) {
+      const added = visibleCount.value - prevCount
+      // Approximate: keep scroll position by scrolling down a bit to compensate
+      messagesContainer.value.scrollTop += added * 60 // rough estimate per message
+    }
+  })
+}
+
+// Auto-scroll to bottom when new messages arrive
+watch(
+  () => store.messages.length,
+  (newLen, oldLen) => {
+    // If new message added (not initial load)
+    if (newLen > oldLen && oldLen > 0) {
+      // If user is at the bottom or auto-scroll enabled, scroll down
+      if (!isScrolledUp.value || isAutoScroll.value) {
+        visibleCount.value = totalMessages.value
+        scrollToBottom()
+      }
+    }
+  }
+)
+
+// Also auto-scroll when processing state changes to stream content
+watch(
+  () => {
+    const msgs = store.messages
+    if (msgs.length === 0) return ''
+    return msgs[msgs.length - 1].content
+  },
+  () => {
+    // Streaming content: scroll to bottom if near bottom
+    if (!isScrolledUp.value) {
+      scrollToBottom()
+    }
+  }
+)
+
+function scrollToBottom(): void {
+  nextTick(() => {
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+      isScrolledUp.value = false
+    }
+  })
+}
+
+function handleScroll(): void {
+  if (!messagesContainer.value) return
+  const el = messagesContainer.value
+  const threshold = 120 // pixels from bottom
+  isScrolledUp.value = el.scrollHeight - el.scrollTop - el.clientHeight > threshold
+}
+
+onMounted(() => {
+  if (messagesContainer.value) {
+    messagesContainer.value.addEventListener('scroll', handleScroll, { passive: true })
+  }
+  // Initial scroll to bottom if there are messages
+  if (hasMessages.value) {
+    scrollToBottom()
+  }
+})
+
+onBeforeUnmount(() => {
+  if (messagesContainer.value) {
+    messagesContainer.value.removeEventListener('scroll', handleScroll)
+  }
+})
 </script>
 
 <template>
   <div class="chat-messages" ref="messagesContainer">
-    <div v-if="!hasMessages" class="empty-state">
-      <p>Start a conversation by typing a message below.</p>
+    <!-- Empty state -->
+    <div v-if="!hasMessages && !store.isProcessing" class="empty-state">
+      <div class="empty-state-icon">&#x1F4AC;</div>
+      <h3 class="empty-state-title">No messages yet</h3>
+      <p class="empty-state-desc">Start a conversation by typing a message below.</p>
+      <p class="empty-state-hint">Press Enter to send, Shift+Enter for a new line.</p>
     </div>
-    <div v-for="msg in store.messages" :key="msg.id" class="message-item" :class="`message-${msg.role}`">
-      <div class="message-role">{{ msg.role }}</div>
-      <div class="message-content">{{ msg.content }}</div>
+
+    <!-- Load more button -->
+    <div v-if="hasMoreMessages" class="load-more-wrapper">
+      <button class="load-more-btn" @click="loadMore">
+        Load older messages ({{ totalMessages - visibleMessages.length }} hidden)
+      </button>
     </div>
-    <div v-if="store.isProcessing" class="message-indicator">
-      <span class="loading-dot"></span>
-      <span class="loading-dot"></span>
-      <span class="loading-dot"></span>
+
+    <!-- Message list -->
+    <template v-for="msg in visibleMessages" :key="msg.id">
+      <ChatMessage :message="msg" />
+    </template>
+
+    <!-- Processing indicator -->
+    <div v-if="store.isProcessing" class="processing-indicator">
+      <LoadingSpinner size="sm" text="AI is thinking..." />
     </div>
+
+    <!-- Scroll to bottom button -->
+    <Transition name="scroll-fade">
+      <button
+        v-if="isScrolledUp && hasMessages"
+        class="scroll-to-bottom"
+        @click="scrollToBottom"
+        title="Scroll to bottom"
+      >
+        <span class="scroll-arrow">&#x2193;</span>
+      </button>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
 .chat-messages {
+  position: relative;
+  height: 100%;
+  overflow-y: auto;
   padding: 16px 0;
-  min-height: 100%;
+  scroll-behavior: smooth;
 }
 
+/* ---- Empty state ---- */
 .empty-state {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 100%;
+  min-height: 300px;
   color: var(--text-secondary);
-  font-size: 14px;
+  text-align: center;
+  padding: 20px;
 }
 
-.message-item {
+.empty-state-icon {
+  font-size: 48px;
   margin-bottom: 16px;
-  padding: 12px;
-  border-radius: 8px;
+  opacity: 0.5;
 }
 
-.message-user {
-  background-color: var(--bg-tertiary);
-  margin-left: 24px;
-}
-
-.message-assistant {
-  background-color: var(--bg-secondary);
-  margin-right: 24px;
-  border: 1px solid var(--border);
-}
-
-.message-system {
-  background-color: transparent;
-  border: 1px dashed var(--border);
-  color: var(--text-secondary);
-  font-style: italic;
-}
-
-.message-role {
-  font-size: 11px;
+.empty-state-title {
+  font-size: 18px;
   font-weight: 600;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
+  color: var(--text-primary);
+  margin: 0 0 8px;
 }
 
-.message-content {
+.empty-state-desc {
   font-size: 14px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
+  margin: 0 0 6px;
+  color: var(--text-secondary);
 }
 
-.message-indicator {
+.empty-state-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+/* ---- Load more ---- */
+.load-more-wrapper {
+  text-align: center;
+  padding: 8px 0 16px;
+}
+
+.load-more-btn {
+  padding: 6px 16px;
+  background-color: var(--bg-secondary);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 0.15s;
+}
+
+.load-more-btn:hover {
+  background-color: var(--bg-tertiary);
+}
+
+/* ---- Processing indicator ---- */
+.processing-indicator {
   display: flex;
-  gap: 4px;
-  padding: 8px 12px;
+  justify-content: center;
+  padding: 16px 0;
 }
 
-.loading-dot {
-  width: 8px;
-  height: 8px;
+/* ---- Scroll to bottom ---- */
+.scroll-to-bottom {
+  position: sticky;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
   border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: background-color 0.15s, transform 0.15s;
+  z-index: 10;
+  margin-top: -52px;
+}
+
+.scroll-to-bottom:hover {
   background-color: var(--accent);
-  animation: pulse 1.4s ease-in-out infinite;
+  color: #fff;
+  transform: translateX(-50%) scale(1.1);
 }
 
-.loading-dot:nth-child(2) {
-  animation-delay: 0.2s;
+.scroll-arrow {
+  font-size: 18px;
+  line-height: 1;
 }
 
-.loading-dot:nth-child(3) {
-  animation-delay: 0.4s;
+/* ---- Transition ---- */
+.scroll-fade-enter-active,
+.scroll-fade-leave-active {
+  transition: opacity 0.2s, transform 0.2s;
 }
 
-@keyframes pulse {
-  0%, 80%, 100% {
-    opacity: 0.3;
-    transform: scale(0.8);
-  }
-  40% {
-    opacity: 1;
-    transform: scale(1);
-  }
+.scroll-fade-enter-from,
+.scroll-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(10px);
 }
 </style>
