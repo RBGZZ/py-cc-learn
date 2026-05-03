@@ -1,0 +1,12 @@
+.git
+.gitignore
+frontend/src
+frontend/node_modules
+frontend/tests
+__pycache__
+*.pyc
+.venv
+.env
+logs
+sessions
+*.log

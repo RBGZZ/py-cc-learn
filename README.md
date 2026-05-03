@@ -1,6 +1,6 @@
 # py-cc-learn &nbsp;`v0.7.0`
 
-> **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 311 tests
+> **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 317 tests
 
 基于 [Claude Code Haha](https://github.com/anthropics/claude-code) 源码，使用 **Python 3.12+** (FastAPI) + **Vue 3** (Vite) 完整重写，支持多厂商模型后端。
 
@@ -10,7 +10,8 @@
 
 | 版本 | 状态 | 说明 |
 |------|------|------|
-| `v0.6.0` | ✅ 最新 | 生产验证：Docker部署 / 多轮工具链路 / Caching对比 / 负载压测 |
+| `v0.7.0` | ✅ 最新 | 测试补齐：中断恢复/max_tokens/100并发/前端组件/Docker部署 |
+| `v0.6.0` | ✅ 已发布 | 生产验证：Docker部署 / 多轮工具链路 / Caching对比 / 负载压测 |
 | `v0.5.0` | ✅ 已发布 | 安全加固：Shell注入修复/tree-sitter AST/权限检查/Docker加固/KDF/CSRF |
 | `v0.4.0` | ✅ 已发布 | 需求评审系统 + MCP 完整集成 (SSE/HTTP/OAuth/连接管理/权限) |
 | `v0.3.5` | ✅ 已发布 | 性能全面完善：Token Budget重写 / Prompt Caching / Extended Thinking / P1修复 |
@@ -187,8 +188,9 @@ py-cc-learn/
 | Phase 21 | 需求评审 + MCP 完整集成 + 可选完善 | ✅ |
 | Phase 22 | 生产就绪发布 (RUNBOOK/审计/安全加固/311 tests) | ✅ |
 | Phase 23 | 生产验证：Docker部署/多轮工具链/Caching/负载压测 | ✅ |
+| Phase 24 | 测试补齐：中断/max_tokens/100并发/前端/Docker | ✅ |
 
-**118/118 Task 完成 · 437/437 Checklist 通过 · 311 tests passed · v0.6.0**
+**118/118 Task 完成 · 437/437 Checklist 通过 · 317 tests passed · v0.7.0**
 
 ---
 

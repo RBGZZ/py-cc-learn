@@ -1,9 +1,9 @@
 FROM python:3.12-slim AS builder
 
 WORKDIR /app
-RUN pip install uv
+RUN pip install uv -i https://mirrors.aliyun.com/pypi/simple/
 
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY server/ ./server/
@@ -15,11 +15,13 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/server ./server
 COPY --from=builder /app/sandbox ./sandbox
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 COPY frontend/dist ./frontend/dist
+
+ENV PATH="/app/.venv/bin:$PATH"
 
 RUN useradd --create-home --shell /bin/bash appuser && chown -R appuser:appuser /app
 USER appuser
