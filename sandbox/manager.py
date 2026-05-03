@@ -203,6 +203,10 @@ class DockerProvider:
             cpu_period=100000,
             cpu_quota=int(self.config.cpus * 100000),
             pids_limit=self.config.pids_limit,
+            cap_drop=["ALL"],
+            security_opt=["no-new-privileges"],
+            read_only=True,
+            tmpfs={"/tmp": "size=256M,mode=1777"},
             detach=True,
         )
 
@@ -254,7 +258,12 @@ class DockerProvider:
         read_only: bool = False,
     ) -> SandboxResult:
         if not self.docker_available:
-            return await self._execute_fallback(command, cwd, timeout)
+            if os.environ.get("ALLOW_HOST_FALLBACK", "").lower() in ("1", "true"):
+                return await self._execute_fallback(command, cwd, timeout)
+            else:
+                raise RuntimeError(
+                    "Docker sandbox unavailable. Set ALLOW_HOST_FALLBACK=1 to fall back to host execution (insecure)."
+                )
 
         try:
             container_cwd = cwd or DOCKER_WORKSPACE
@@ -274,6 +283,10 @@ class DockerProvider:
                         cpu_period=100000,
                         cpu_quota=int(self.config.cpus * 100000),
                         pids_limit=self.config.pids_limit,
+                        cap_drop=["ALL"],
+                        security_opt=["no-new-privileges"],
+                        read_only=True,
+                        tmpfs={"/tmp": "size=256M,mode=1777"},
                         volumes=volumes,
                         detach=True,
                     ),
@@ -339,9 +352,14 @@ class DockerProvider:
                     await self._return_container(container)
 
         except (DockerException, APIError) as e:
-            logger.warning(f"Docker execution failed, falling back to host: {e}")
+            logger.warning(f"Docker execution failed: {e}")
             self._docker_available = False
-            return await self._execute_fallback(command, cwd, timeout)
+            if os.environ.get("ALLOW_HOST_FALLBACK", "").lower() in ("1", "true"):
+                return await self._execute_fallback(command, cwd, timeout)
+            else:
+                raise RuntimeError(
+                    "Docker sandbox unavailable. Set ALLOW_HOST_FALLBACK=1 to fall back to host execution (insecure)."
+                )
 
     async def _execute_fallback(
         self,

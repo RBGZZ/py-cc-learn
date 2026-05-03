@@ -24,4 +24,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /workspace
 
+# Create non-root user for security
+RUN useradd -m -s /bin/bash sandbox && \
+    mkdir -p /workspace /tmp && \
+    chown -R sandbox:sandbox /workspace /tmp
+USER sandbox
+
 ENTRYPOINT ["/bin/bash", "-c"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 import time
@@ -79,6 +80,69 @@ def _get_command_category(command: str) -> dict[str, bool]:
     return result
 
 
+try:
+    import tree_sitter
+    HAS_TREESITTER = True
+except ImportError:
+    HAS_TREESITTER = False
+
+
+def _parse_with_treesitter(command: str):
+    """Parse a bash command with tree-sitter and return the root AST node."""
+    if not HAS_TREESITTER:
+        return None
+    try:
+        parser = tree_sitter.Parser()
+        bash_lang = tree_sitter.Language("tree_sitter_bash/bindings/python/tree_sitter_bash")
+        parser.set_language(bash_lang)
+        tree = parser.parse(command.encode("utf-8"))
+        return tree.root_node
+    except Exception:
+        return None
+
+
+AST_DANGEROUS_COMMANDS = {"rm", "mkfs", "dd", "shutdown", "reboot", "chmod"}
+AST_DANGEROUS_PIPES = {"sh", "bash", "zsh", "dash"}
+
+
+def _check_ast_dangerous(node) -> list[str]:
+    """Walk tree-sitter AST and detect dangerous patterns. Returns list of reasons."""
+    dangers = []
+
+    def walk(n):
+        if n.type == "command_substitution":
+            dangers.append(f"Command substitution detected: {n.text[:80].decode('utf-8', errors='replace')}")
+        if n.type == "command":
+            cmd_name = None
+            for child in n.children:
+                if child.type == "command_name":
+                    cmd_name = child.text.decode("utf-8", errors="replace").strip()
+                    break
+            if cmd_name and cmd_name in AST_DANGEROUS_COMMANDS:
+                flag = ""
+                for child in n.children:
+                    if child.type == "word":
+                        word_text = child.text.decode("utf-8", errors="replace")
+                        if word_text.startswith("-rf") or word_text.startswith("--force"):
+                            flag = word_text
+                            break
+                dangers.append(f"Dangerous command: {cmd_name} {flag}".strip())
+        if n.type == "pipeline":
+            last_cmd = None
+            for child in n.children:
+                if child.type == "command":
+                    for gc in child.children:
+                        if gc.type == "command_name":
+                            last_cmd = gc.text.decode("utf-8", errors="replace").strip()
+            if last_cmd and last_cmd in AST_DANGEROUS_PIPES:
+                dangers.append(f"Pipeline to shell: ... | {last_cmd}")
+        for child in n.children:
+            walk(child)
+
+    walk(node)
+    return dangers
+
+
 class BashTool(Tool[BashInput, BashOutput, Any]):
     @property
     def name(self) -> str:
@@ -107,6 +171,10 @@ class BashTool(Tool[BashInput, BashOutput, Any]):
         return False
 
     def is_destructive(self, input: BashInput | None = None) -> bool:
+        if input and hasattr(input, "command"):
+            cmd = input.command.lower()
+            if any(p in cmd for p in ["rm -rf", "mkfs", "dd if=", "> /dev/", ":(){", "chmod 777"]):
+                return True
         return False
 
     def is_search_or_read_command(self, input: BashInput | None = None) -> dict[str, bool] | None:
@@ -124,12 +192,23 @@ class BashTool(Tool[BashInput, BashOutput, Any]):
         dangerous_msg = _check_dangerous_command(input.command)
         if dangerous_msg:
             errors.append(dangerous_msg)
+        if HAS_TREESITTER:
+            ast = _parse_with_treesitter(input.command)
+            if ast is not None:
+                ast_dangers = _check_ast_dangerous(ast)
+                if ast_dangers:
+                    for d in ast_dangers:
+                        errors.append(d)
         return ValidationResult(valid=len(errors) == 0, errors=errors)
 
     async def check_permissions(
         self, input: dict[str, Any], context: Any = None
     ) -> PermissionResult:
-        return PermissionResult(behavior="allow", updated_input=input)
+        return PermissionResult(
+            behavior="ask",
+            updated_input=input,
+            message="Shell command execution requires user approval",
+        )
 
     async def call(
         self,
@@ -141,14 +220,14 @@ class BashTool(Tool[BashInput, BashOutput, Any]):
     ) -> ToolCallResult:
         timeout_seconds = max(1, args.timeout / 1000.0)
         env = os.environ.copy()
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
         start_time = time.time()
 
         async def _run():
             try:
                 process = await asyncio.wait_for(
-                    asyncio.create_subprocess_shell(
-                        args.command,
+                    asyncio.create_subprocess_exec(
+                        "bash", "-c", args.command,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                         env=env,
@@ -161,15 +240,13 @@ class BashTool(Tool[BashInput, BashOutput, Any]):
                         timeout=timeout_seconds,
                     )
                 except TimeoutError:
-                    try:
+                    with contextlib.suppress(Exception):
                         process.kill()
-                    except Exception:
-                        pass
                     try:
                         stdout_bytes, stderr_bytes = await process.communicate()
                     except Exception:
                         stdout_bytes, stderr_bytes = (b"", b"")
-                    elapsed = (time.time() - start_time) * 1000
+                    (time.time() - start_time) * 1000
                     return BashOutput(
                         stdout=stdout_bytes.decode("utf-8", errors="replace")[
                             :MAX_RESULT_SIZE_CHARS

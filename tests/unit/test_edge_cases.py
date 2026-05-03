@@ -13,21 +13,23 @@ class TestEdgeCases:
 
     def test_empty_prompt_rejected(self):
         """Ensure empty prompts are handled."""
+        from fastapi.exceptions import HTTPException as FastAPIHTTPException
         from server.main import _validate_prompt
         try:
             _validate_prompt("")
-            assert False, "Should reject empty prompt"
-        except ValueError as e:
-            assert "must not be empty" in str(e)
+            pytest.fail("Should reject empty prompt")
+        except FastAPIHTTPException as e:
+            assert e.status_code == 422
 
     def test_whitespace_prompt_rejected(self):
         """Ensure whitespace-only prompts are handled."""
+        from fastapi.exceptions import HTTPException as FastAPIHTTPException
         from server.main import _validate_prompt
         try:
             _validate_prompt("   ")
-            assert False, "Should reject whitespace-only"
-        except ValueError as e:
-            assert "must not be empty" in str(e)
+            pytest.fail("Should reject whitespace-only")
+        except FastAPIHTTPException as e:
+            assert e.status_code == 422
 
     def test_long_prompt_below_limit_accepted(self):
         """Ensure prompts at the boundary are handled."""

@@ -1,4 +1,4 @@
-# py-cc-learn &nbsp;`v1.0.0-rc1`
+# py-cc-learn &nbsp;`v1.0.0`
 
 > **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 311 tests
 
@@ -10,7 +10,8 @@
 
 | 版本 | 状态 | 说明 |
 |------|------|------|
-| `v0.4.0` | ✅ 最新 | 需求评审系统 + MCP 完整集成 (SSE/HTTP/OAuth/连接管理/权限) |
+| `v1.0.0-rc1` | ✅ 最新 | 生产就绪发布候选：311 tests, RUNBOOK, 生产审计, 安全加固 |
+| `v0.4.0` | ✅ 已发布 | 需求评审系统 + MCP 完整集成 (SSE/HTTP/OAuth/连接管理/权限) |
 | `v0.3.5` | ✅ 已发布 | 性能全面完善：Token Budget重写 / Prompt Caching / Extended Thinking / P1修复 |
 | `v0.3.4` | ✅ 已发布 | 性能测试缺口补齐 + 深度性能审计（43 gaps, 14 P0 已修复） |
 | `v0.3.3` | ✅ 已发布 | 性能基线对齐：HTTP客户端复用 / tiktoken统一 / slowapi限流 |
@@ -148,7 +149,7 @@ py-cc-learn/
 │   ├── nginx.conf             # 反向代理
 │   ├── docker-compose.yml     # 容器编排
 │   └── README.md              # 部署指南
-├── tests/                     # 295 单元/集成/E2E 测试
+├── tests/                     # 311 单元/集成/E2E 测试
 ├── tools/                     # 10 个性能基准 + E2E + 多 Provider 测试
 ├── audit/                     # TS 源码对比审计 (44/44 + 性能审计 43 gaps)
 ├── .trae/specs/python-rewrite/ # 技术规格文档
@@ -183,8 +184,9 @@ py-cc-learn/
 | Phase 19 | 深度性能审计 (6 模块, 43 gaps, 14 P0 修复) | ✅ |
 | Phase 20 | 性能全面完善 (TokenBudget/PromptCaching/ExtendedThinking/P1修复) | ✅ |
 | Phase 21 | 需求评审 + MCP 完整集成 + 可选完善 | ✅ |
+| Phase 22 | 生产就绪发布 (RUNBOOK/审计/安全加固/311 tests) | ✅ |
 
-**92/92 Task 完成 · 383/383 Checklist 通过 · 295 tests passed · v0.4.0**
+**92/92 Task 完成 · 383/383 Checklist 通过 · 311 tests passed · v1.0.0-rc1**
 
 ---
 

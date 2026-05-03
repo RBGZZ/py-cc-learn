@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import os
+import secrets
 import signal
 import time
 import uuid
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -75,21 +76,20 @@ class StatusResponse(BaseModel):
 
 
 def _validate_prompt(prompt: str) -> None:
-    stripped = prompt.strip()
-    if not stripped:
-        raise ValueError("prompt must not be empty")
-    if all(
-        c in "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f"
-        "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
-        "\x7f"
-        for c in stripped
-    ):
-        raise ValueError("prompt must not consist entirely of control characters")
-    from server.utils.security import detect_injection
+    if not prompt or not isinstance(prompt, str):
+        raise HTTPException(status_code=422, detail="prompt_required")
+    if len(prompt.strip()) == 0:
+        raise HTTPException(status_code=422, detail="prompt_empty")
+    if len(prompt) > MAX_PROMPT_CHARS:
+        raise HTTPException(status_code=422, detail="prompt_too_long")
+    try:
+        from server.utils.security import detect_injection
 
-    injections = detect_injection(prompt)
-    if injections:
-        raise ValueError("prompt contains injection patterns")
+        injections = detect_injection(prompt)
+        if injections:
+            raise ValueError("prompt_contains_injection_patterns")
+    except ImportError:
+        pass
 
 
 def _get_tools():
@@ -216,11 +216,53 @@ async def proxy_fix_middleware(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:8000").split(","),
-    allow_credentials=True if os.environ.get("CORS_ALLOW_CREDENTIALS", "true").lower() == "true" else False,
+    allow_credentials=os.environ.get("CORS_ALLOW_CREDENTIALS", "true").lower() == "true",
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Request-ID", "Retry-After"],
 )
+
+_csrf_tokens: dict[str, str] = {}
+
+
+@app.middleware("http")
+async def csrf_middleware(request: Request, call_next):
+    if request.url.path in ("/api/v1/health", "/api/v1/status"):
+        return await call_next(request)
+
+    if request.method == "GET":
+        response = await call_next(request)
+        csrf_token = request.cookies.get("csrf_token")
+        if not csrf_token:
+            csrf_token = secrets.token_hex(32)
+            response.set_cookie(
+                key="csrf_token",
+                value=csrf_token,
+                httponly=False,
+                samesite="strict",
+                max_age=3600,
+            )
+        return response
+
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        csrf_cookie = request.cookies.get("csrf_token")
+        csrf_header = request.headers.get("X-CSRF-Token")
+        if csrf_cookie and csrf_header and csrf_cookie == csrf_header:
+            return await call_next(request)
+        if not csrf_cookie:
+            response = await call_next(request)
+            csrf_token = secrets.token_hex(32)
+            response.set_cookie(
+                key="csrf_token",
+                value=csrf_token,
+                httponly=False,
+                samesite="strict",
+                max_age=3600,
+            )
+            return response
+        return JSONResponse(status_code=403, content={"error": "csrf_token_mismatch"})
+
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -322,6 +364,13 @@ async def prompt_validation_middleware(request: Request, call_next):
                             "error": "control_chars_only",
                             "message": "prompt must not consist entirely of control characters",
                         },
+                    )
+                try:
+                    _validate_prompt(prompt)
+                except ValueError as exc:
+                    return JSONResponse(
+                        status_code=422,
+                        content={"error": str(exc), "message": str(exc)},
                     )
             request._body = body
         except Exception:

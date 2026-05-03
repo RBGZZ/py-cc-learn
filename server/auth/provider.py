@@ -4,7 +4,7 @@ import base64
 import json
 import os
 import sys
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from server.utils.settings import get_settings
 
 
-class ApiKeySource(str, Enum):
+class ApiKeySource(StrEnum):
     ENV = "ANTHROPIC_API_KEY"
     API_KEY_HELPER = "apiKeyHelper"
     MANAGED_KEY = "/login managed key"
@@ -31,12 +31,13 @@ class ApiKeyStore:
     _SALT_FILE = ".key_salt"
     _KEY_FILE = ".secure_keys"
     _ITERATIONS = 600_000
+    _STATIC_SALT = b"py-cc-learn-kdf-salt-v1"
 
     def __init__(self) -> None:
         settings = get_settings()
         self._config_dir: Path = settings.config_dir
 
-    def _derive_key(self, salt: bytes) -> bytes:
+    def _derive_key(self, salt: bytes, static_component: bytes = _STATIC_SALT) -> bytes:
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -48,9 +49,9 @@ class ApiKeyStore:
             or os.environ.get("HOSTNAME", "")
             or os.uname().nodename
         )
-        return base64.urlsafe_b64encode(kdf.derive(machine_id.encode()))
+        return base64.urlsafe_b64encode(kdf.derive(machine_id.encode() + static_component))
 
-    def _get_key(self) -> bytes:
+    def _get_key(self, static_component: bytes = _STATIC_SALT) -> bytes:
         salt_path = self._config_dir / self._SALT_FILE
         if salt_path.exists():
             salt = salt_path.read_bytes()
@@ -58,7 +59,7 @@ class ApiKeyStore:
             salt = os.urandom(16)
             self._config_dir.mkdir(parents=True, exist_ok=True)
             salt_path.write_bytes(salt)
-        return self._derive_key(salt)
+        return self._derive_key(salt, static_component)
 
     def save(self, vendor: str, api_key: str) -> None:
         key_path = self._config_dir / self._KEY_FILE
@@ -86,16 +87,22 @@ class ApiKeyStore:
         key_path = self._config_dir / self._KEY_FILE
         if not key_path.exists():
             return None
+        content = key_path.read_bytes()
+        if not content:
+            return None
         try:
             fernet = Fernet(self._get_key())
-            content = key_path.read_bytes()
-            if not content:
-                return None
             decrypted = fernet.decrypt(content)
             data = json.loads(decrypted)
             return data.get(vendor)
         except Exception:
-            return None
+            try:
+                fernet = Fernet(self._get_key(static_component=b""))
+                decrypted = fernet.decrypt(content)
+                data = json.loads(decrypted)
+                return data.get(vendor)
+            except Exception:
+                return None
 
     def delete(self, vendor: str) -> None:
         key_path = self._config_dir / self._KEY_FILE
@@ -112,7 +119,18 @@ class ApiKeyStore:
             encrypted = fernet.encrypt(json.dumps(data).encode())
             key_path.write_bytes(encrypted)
         except Exception:
-            pass
+            try:
+                fernet = Fernet(self._get_key(static_component=b""))
+                content = key_path.read_bytes()
+                if not content:
+                    return
+                decrypted = fernet.decrypt(content)
+                data = json.loads(decrypted)
+                data.pop(vendor, None)
+                encrypted = Fernet(self._get_key()).encrypt(json.dumps(data).encode())
+                key_path.write_bytes(encrypted)
+            except Exception:
+                pass
 
 
 _api_key_store: ApiKeyStore | None = None
