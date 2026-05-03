@@ -147,21 +147,29 @@ class AnthropicProvider(Provider):
         )
 
         async def _attempt(attempt: int) -> Any:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(600.0),
-                limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
-            ) as client:
+            if self._http_client is not None:
+                client = self._http_client
                 response = await client.post(
                     f"{self.config.base_url}/v1/messages",
                     json=body,
                     headers=headers,
                 )
-                if response.status_code != 200:
-                    raise _get_anthropic_error_from_response(
-                        response.status_code,
-                        response.json() if response.text else {},
+            else:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(600.0),
+                    limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
+                ) as client:
+                    response = await client.post(
+                        f"{self.config.base_url}/v1/messages",
+                        json=body,
+                        headers=headers,
                     )
-                return response
+            if response.status_code != 200:
+                raise _get_anthropic_error_from_response(
+                    response.status_code,
+                    response.json() if response.text else {},
+                )
+            return response
 
         try:
             response = await with_retry(_attempt, retry_config)

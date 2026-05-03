@@ -66,31 +66,39 @@ class OpenAIProvider(Provider):
         )
 
         async def _attempt(attempt: int) -> Any:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(600.0),
-                limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
-            ) as client:
+            if self._http_client is not None:
+                client = self._http_client
                 response = await client.post(
                     f"{self.config.base_url}/v1/chat/completions",
                     json=body,
                     headers=headers,
                 )
-                if response.status_code != 200:
-                    error_msg = response.text
-                    try:
-                        error_body = response.json()
-                        error_msg = error_body.get("error", {}).get("message", error_msg)
-                    except Exception:
-                        pass
+            else:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(600.0),
+                    limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
+                ) as client:
+                    response = await client.post(
+                        f"{self.config.base_url}/v1/chat/completions",
+                        json=body,
+                        headers=headers,
+                    )
+            if response.status_code != 200:
+                error_msg = response.text
+                try:
+                    error_body = response.json()
+                    error_msg = error_body.get("error", {}).get("message", error_msg)
+                except Exception:
+                    pass
 
-                    class OpenAIAPIError(Exception):
-                        def __init__(self, message: str, status: int):
-                            super().__init__(message)
-                            self.status_code = status
-                            self.status = status
+                class OpenAIAPIError(Exception):
+                    def __init__(self, message: str, status: int):
+                        super().__init__(message)
+                        self.status_code = status
+                        self.status = status
 
-                    raise OpenAIAPIError(error_msg, response.status_code)
-                return response
+                raise OpenAIAPIError(error_msg, response.status_code)
+            return response
 
         try:
             response = await with_retry(_attempt, retry_config)

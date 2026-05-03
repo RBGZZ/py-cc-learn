@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "py-cc-learn"
-version = "0.3.2"
+version = "0.3.4"
 description = "Python rewrite of Claude Code Haha - multi-vendor AI coding assistant"
 readme = "README.md"
 license = {text = "MIT"}

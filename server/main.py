@@ -17,9 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
+
+from server.utils.rate_limit import limiter
 
 load_dotenv()
 
@@ -33,8 +35,6 @@ SHUTDOWN_TIMEOUT = 10.0
 _shutting_down = False
 _active_connection_count = 0
 _active_connection_lock = asyncio.Lock()
-
-limiter = Limiter(key_func=get_remote_address, default_limits=[])
 
 
 class ChatRequest(BaseModel):
@@ -216,6 +216,8 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Request-ID", "Retry-After"],
 )
+
+app.add_middleware(SlowAPIMiddleware)
 
 
 @app.middleware("http")

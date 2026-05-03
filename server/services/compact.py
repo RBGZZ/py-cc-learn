@@ -37,6 +37,8 @@ MANUAL_COMPACT_BUFFER_TOKENS = 3_000
 
 MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3
 
+COMPACT_MAX_OUTPUT_TOKENS = 20_000
+
 MAX_OUTPUT_TOKENS_FOR_SUMMARY = 20_000
 
 # === Post-Compact Constants ===
@@ -133,59 +135,74 @@ MAX_PTL_RETRIES = 3
 PTL_RETRY_MARKER = "[earlier conversation truncated for compaction retry]"
 
 
-def rough_token_count(text: str) -> int:
+def rough_token_count(text: str, use_tiktoken: bool = True, model: str = "cl100k_base") -> int:
     if not text:
         return 0
+    if use_tiktoken:
+        try:
+            return token_utils.count_tokens(text, model)
+        except Exception:
+            pass
     return math.ceil(len(text) / 4)
 
 
-def rough_token_count_for_messages(messages: list[dict[str, Any]]) -> int:
+def rough_token_count_for_messages(messages: list[dict[str, Any]], use_tiktoken: bool = True, model: str = "cl100k_base") -> int:
+    if use_tiktoken:
+        try:
+            return token_utils.count_tokens_for_messages(messages, model)
+        except Exception:
+            pass
     total = 0
     for msg in messages:
         if msg.get("type") not in ("user", "assistant"):
             continue
         content = msg.get("message", {}).get("content", msg.get("content", []))
         if isinstance(content, str):
-            total += rough_token_count(content)
+            total += rough_token_count(content, use_tiktoken=False)
         elif isinstance(content, list):
             for block in content:
                 if not isinstance(block, dict):
                     continue
                 block_type = block.get("type")
                 if block_type == "text":
-                    total += rough_token_count(block.get("text", ""))
+                    total += rough_token_count(block.get("text", ""), use_tiktoken=False)
                 elif block_type == "tool_result":
                     total += _calculate_tool_result_tokens(block)
                 elif block_type in ("image", "document"):
                     total += IMAGE_MAX_TOKEN_SIZE
                 elif block_type == "thinking":
-                    total += rough_token_count(block.get("thinking", ""))
+                    total += rough_token_count(block.get("thinking", ""), use_tiktoken=False)
                 elif block_type == "redacted_thinking":
-                    total += rough_token_count(block.get("data", ""))
+                    total += rough_token_count(block.get("data", ""), use_tiktoken=False)
                 elif block_type == "tool_use":
                     total += rough_token_count(
-                        block.get("name", "") + json.dumps(block.get("input", {}))
+                        block.get("name", "") + json.dumps(block.get("input", {})), use_tiktoken=False
                     )
                 else:
-                    total += rough_token_count(json.dumps(block))
+                    total += rough_token_count(json.dumps(block), use_tiktoken=False)
     return math.ceil(total * (4 / 3))
 
 
-def _calculate_tool_result_tokens(block: dict[str, Any]) -> int:
+def _calculate_tool_result_tokens(block: dict[str, Any], encoding=None) -> int:
     content = block.get("content")
     if not content:
         return 0
     if isinstance(content, str):
+        if encoding:
+            return len(encoding.encode(content))
         return rough_token_count(content)
     if isinstance(content, list):
-        return sum(
-            rough_token_count(item.get("text", ""))
-            if isinstance(item, dict) and item.get("type") == "text"
-            else IMAGE_MAX_TOKEN_SIZE
-            if isinstance(item, dict) and item.get("type") in ("image", "document")
-            else 0
-            for item in content
-        )
+        total = 0
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type == "text":
+                text = item.get("text", "")
+                total += len(encoding.encode(text)) if encoding else rough_token_count(text)
+            elif item_type in ("image", "document"):
+                total += IMAGE_MAX_TOKEN_SIZE
+        return total
     return 0
 
 
@@ -220,6 +237,17 @@ def microcompact_messages(
     compactable_ids = _collect_compactable_tool_ids(messages)
     compactable_set = set(compactable_ids)
 
+    encoding = None
+    try:
+        model = (
+            tool_use_context.get("options", {}).get("main_loop_model", "claude-sonnet-4-20250514")
+            if tool_use_context
+            else "claude-sonnet-4-20250514"
+        )
+        encoding = token_utils._get_encoding_for_model(model)
+    except Exception:
+        pass
+
     tokens_saved = 0
     result: list[dict[str, Any]] = []
 
@@ -242,7 +270,7 @@ def microcompact_messages(
                 and block.get("tool_use_id") in compactable_set
                 and block.get("content") != TIME_BASED_MC_CLEARED_MESSAGE
             ):
-                tokens_saved += _calculate_tool_result_tokens(block)
+                tokens_saved += _calculate_tool_result_tokens(block, encoding)
                 touched = True
                 new_block = {**block, "content": TIME_BASED_MC_CLEARED_MESSAGE}
                 new_content.append(new_block)
@@ -299,12 +327,14 @@ def _get_effective_context_window(model: str) -> int:
         except ValueError:
             pass
 
-    reserved = min(MAX_OUTPUT_TOKENS_FOR_SUMMARY, 20000)
+    reserved = min(MAX_OUTPUT_TOKENS_FOR_SUMMARY, COMPACT_MAX_OUTPUT_TOKENS)
     return context_window - reserved
 
 
 def _get_context_window_for_model(model: str) -> int:
     model_lower = model.lower()
+    if model_supports_1m(model):
+        return 1_000_000
     if "claude-sonnet-4" in model_lower or "claude-opus-4" in model_lower:
         return 200_000
     if "claude-haiku-4" in model_lower:
@@ -319,7 +349,24 @@ def _get_context_window_for_model(model: str) -> int:
         return 16_385
     if "gemini" in model_lower:
         return 1_000_000
+    if "claude-opus-4-6" in model_lower:
+        return 1_000_000
+    if "claude-sonnet-4-5" in model_lower:
+        return 1_000_000
     return 200_000
+
+
+def has_1m_context(model: str) -> bool:
+    if os.environ.get("CLAUDE_CODE_DISABLE_1M_CONTEXT", "").lower() in ("1", "true"):
+        return False
+    return "[1m]" in model
+
+
+def model_supports_1m(model: str) -> bool:
+    if os.environ.get("CLAUDE_CODE_DISABLE_1M_CONTEXT", "").lower() in ("1", "true"):
+        return False
+    model_lower = model.lower()
+    return "claude-sonnet-4" in model_lower or "opus-4-6" in model_lower
 
 
 def is_auto_compact_enabled() -> bool:

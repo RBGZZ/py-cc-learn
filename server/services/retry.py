@@ -24,6 +24,13 @@ PERSISTENT_MAX_BACKOFF_MS = 5 * 60 * 1000
 PERSISTENT_RESET_CAP_MS = 6 * 60 * 60 * 1000
 HEARTBEAT_INTERVAL_MS = 30_000
 
+
+def is_persistent_retry_enabled() -> bool:
+    """Check if unattended persistent retry is enabled."""
+    import os
+    return os.environ.get("CLAUDE_CODE_UNATTENDED_RETRY", "").lower() in ("1", "true")
+
+
 FOREGROUND_529_RETRY_SOURCES = {
     "repl_main_thread",
     "repl_main_thread:outputStyle:custom",
@@ -100,6 +107,19 @@ class CircuitBreaker:
                     self._state = CircuitState.OPEN
                 elif self._state == CircuitState.HALF_OPEN:
                     self._state = CircuitState.OPEN
+
+
+def is_stale_connection_error(error: Exception) -> bool:
+    """Detect ECONNRESET/EPIPE stale keep-alive socket errors."""
+    msg = str(error).lower()
+    return "econnreset" in msg or "epipe" in msg or "connection reset" in msg
+
+
+def extract_connection_error_details(error: Exception) -> dict | None:
+    """Extract error code from connection errors."""
+    if hasattr(error, "request") and hasattr(error.request, "url"):
+        return {"url": str(error.request.url)}
+    return None
 
 
 class RetryConfig:
@@ -267,6 +287,22 @@ def _get_retry_after_header(error: Exception) -> str | None:
         if isinstance(headers, dict):
             return headers.get("retry-after")
     return None
+
+
+def get_rate_limit_reset_delay_ms(headers: dict) -> int | None:
+    """Parse anthropic-ratelimit-unified-reset header for exact reset delay."""
+    reset_header = headers.get("anthropic-ratelimit-unified-reset")
+    if not reset_header:
+        return None
+    try:
+        import time
+        reset_unix = float(reset_header)
+        delay_ms = int(reset_unix * 1000 - time.time() * 1000)
+        if delay_ms <= 0:
+            return None
+        return min(delay_ms, PERSISTENT_RESET_CAP_MS)
+    except (ValueError, TypeError):
+        return None
 
 
 def parse_max_tokens_context_overflow_error(error: Exception) -> dict[str, int] | None:

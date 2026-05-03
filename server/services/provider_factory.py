@@ -60,6 +60,19 @@ class ProviderFactory:
         return cls._circuit_breakers[provider_name]
 
     @classmethod
+    def _ensure_sync_client(cls) -> httpx.AsyncClient:
+        if cls._http_client is None:
+            cls._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(600.0),
+                limits=httpx.Limits(
+                    max_keepalive_connections=20,
+                    max_connections=100,
+                    keepalive_expiry=30,
+                ),
+            )
+        return cls._http_client
+
+    @classmethod
     def get_provider(
         cls,
         provider_type: ProviderType | None = None,
@@ -77,6 +90,7 @@ class ProviderFactory:
             return cls._instances[key]
 
         provider = cls._create_provider(provider_type, effective_config)
+        provider.set_http_client(cls._ensure_sync_client())
         cls._instances[key] = provider
         return provider
 

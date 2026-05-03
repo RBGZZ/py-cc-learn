@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from server.services.compact import AUTOCOMPACT_BUFFER_TOKENS, _get_context_window_for_model
 from server.services.provider import Provider, StreamEvent
 from server.state.session import SessionStorage
 from server.tools.streaming import (
@@ -31,6 +32,7 @@ class QueryExitReason(str, Enum):
     MAX_OUTPUT_TOKENS_RECOVERIES = "max_output_tokens_max_recoveries"
     CANCELLED_BY_USER = "cancelled_by_user"
     PROMPT_TOO_LONG = "prompt_too_long"
+    HOOK_STOPPED = "hook_stopped"
 
 
 class ContinueReason(str, Enum):
@@ -45,12 +47,20 @@ class ContinueReason(str, Enum):
 
 MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3
 DEFAULT_MAX_TURNS = 50
-AUTO_COMPACT_TOKEN_THRESHOLD = 180_000
+MAX_OUTPUT_TOKENS_DEFAULT = 32000
+MAX_OUTPUT_TOKENS_FLOOR = 3000
 TOKEN_BUDGET_RATIO = 0.9
 DIMINISHING_RETURNS_DELTA_THRESHOLD = 500
 DIMINISHING_RETURNS_CONSECUTIVE = 3
 ESCALATED_MAX_TOKENS = 64000
 CAPPED_DEFAULT_MAX_TOKENS = 8000
+
+
+def get_auto_compact_threshold(context_window: int) -> int:
+    return context_window - AUTOCOMPACT_BUFFER_TOKENS
+
+
+AUTO_COMPACT_TOKEN_THRESHOLD = get_auto_compact_threshold(200_000)
 
 
 class DynamicAbortController:
@@ -376,7 +386,7 @@ class QueryEngine:
             return
         messages_for_api = self._build_messages_for_api()
         tool_schemas = self._build_tool_schemas()
-        max_tokens = self.state.max_output_tokens_override or getattr(self.config.provider.config, "max_tokens", 4096)
+        max_tokens = self.state.max_output_tokens_override or getattr(self.config.provider.config, "max_tokens", MAX_OUTPUT_TOKENS_DEFAULT)
         self.config.provider.config.max_tokens = max_tokens
         async for event in self.config.provider.stream_chat(messages=messages_for_api, system_prompt=self._system_prompt, tools=tool_schemas):
             yield {"type": event.type, "data": event.data}
@@ -535,12 +545,15 @@ class QueryEngine:
 
     def _check_auto_compact(self) -> str | None:
         if not self.config.is_auto_compact_enabled: return None
+        model = self.config.provider.config.model if self.config.provider else ""
+        context_window = _get_context_window_for_model(model)
+        threshold = get_auto_compact_threshold(context_window)
         estimated_tokens = self._compute_estimated_tokens()
-        if estimated_tokens < AUTO_COMPACT_TOKEN_THRESHOLD: return None
+        if estimated_tokens < threshold: return None
         tokens_freed = self._try_snip_compact() + self._try_microcompact()
         if tokens_freed > 0:
             self.state._compact_boundary_index = max(0, len(self.state.messages) - 20)
-        if self._compute_estimated_tokens() >= AUTO_COMPACT_TOKEN_THRESHOLD:
+        if self._compute_estimated_tokens() >= threshold:
             return QueryExitReason.BLOCKING_LIMIT.value
         return None
 

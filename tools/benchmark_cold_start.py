@@ -4,6 +4,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
+import urllib.request
 
 
 def measure_import_time() -> float:
@@ -26,6 +27,31 @@ def measure_cli_help() -> float:
     return time.perf_counter() - start
 
 
+def measure_uvicorn_startup() -> float:
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "server.main:app", "--port", "8000"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    start = time.perf_counter()
+    deadline = start + 60.0
+    try:
+        while time.perf_counter() < deadline:
+            try:
+                urllib.request.urlopen("http://127.0.0.1:8000/api/v1/health", timeout=1)
+                return time.perf_counter() - start
+            except Exception:
+                time.sleep(0.1)
+        return -1.0
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+
 def main():
     print("=== Cold Start Benchmark ===")
 
@@ -45,6 +71,9 @@ def main():
 
     cli_time = measure_cli_help()
     print(f"  CLI --help: {cli_time:.4f}s")
+
+    uvicorn_time = measure_uvicorn_startup()
+    print(f"  Uvicorn startup: {uvicorn_time:.4f}s")
 
     print(f"\nPASS: cold_start={avg_import:.2f}s (target < 5s)")
 
