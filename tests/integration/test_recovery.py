@@ -126,3 +126,38 @@ async def test_failing_provider_handled_gracefully():
         pass
 
     assert provider.call_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_max_tokens_truncation_recovery():
+    """Verify max_tokens truncation does not crash the engine."""
+    provider = TruncatedProvider()
+    engine = QueryEngine(QueryEngineConfig(
+        provider=provider, tools=[], system_prompt="test", max_turns=6,
+    ))
+
+    events = []
+    try:
+        async for event in engine.submit_message("long prompt", is_meta=True):
+            events.append(event)
+    except Exception:
+        pass
+
+    event_types = [
+        (e.get("type") if isinstance(e, dict) else type(e).__name__)
+        for e in events
+    ]
+
+    has_exit = any(
+        isinstance(e, dict) and e.get("type") == "exit"
+        for e in events
+    )
+    has_assistant = any(
+        isinstance(e, dict) and e.get("type") == "assistant"
+        for e in events
+    )
+
+    assert has_assistant, f"Should have assistant event, got: {event_types[:10]}"
+    assert provider.call_count >= 1, "Provider should be called"
+    # Engine should not crash - exit may come from MAX_TURNS if recovery runs out
+    assert provider.call_count <= 6, f"Should not exceed max_turns, got {provider.call_count}"

@@ -57,6 +57,21 @@ Skipped — Level 2 already shows 93% rate-limited. 100 concurrent would produce
 
 ---
 
+## Level 3: 100 Concurrent Users (60s) — v0.7.0
+
+| Metric | Value |
+|--------|-------|
+| Total Requests | 2,901 |
+| Rate Limited (403) | 2,801 |
+| Stream Error | 30 |
+| P50 latency (through) | 4ms |
+| P95 latency (through) | 17ms |
+| P99 latency (through) | 160ms |
+
+**Analysis**: 100并发确认系统稳定。2801/2901 被限流（96.6%），通过限流的请求 P50=4ms, P95=17ms, P99=160ms。**服务无崩溃。**
+
+---
+
 ## Multi-Turn Tool Chain Results
 
 | Test | Status | Duration | Tool Calls |

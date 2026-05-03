@@ -121,3 +121,49 @@ async def test_engine_continues_after_clean_termination():
         pass
 
     assert engine.state.turn_count >= 0
+
+
+@pytest.mark.asyncio
+async def test_abort_yields_events_with_tool_result():
+    """Verify abort produces events with tool_result for orphan tool usage."""
+    provider = SlowToolProvider(tool_delay=0.1)
+    tool = FakeBashTool(delay=0.1)
+    abort_event = asyncio.Event()
+
+    engine = QueryEngine(QueryEngineConfig(
+        provider=provider, tools=[tool], system_prompt="test", max_turns=2,
+        abort_signal=abort_event,
+    ))
+
+    events = []
+    abort_task = asyncio.create_task(
+        _collect_with_abort(engine, "run bash", abort_event, events)
+    )
+    await abort_task
+
+    event_types = [e.get("type") for e in events if isinstance(e, dict)]
+
+    has_tool_result = any(
+        isinstance(e, dict) and e.get("type") == "tool_result"
+        for e in events
+    )
+    has_assistant = any(
+        isinstance(e, dict) and e.get("type") == "assistant"
+        for e in events
+    )
+
+    assert has_assistant, f"Should have assistant event, got: {event_types}"
+    assert has_tool_result, f"Should have tool_result, got: {event_types}"
+
+
+async def _collect_with_abort(engine, prompt, abort_event, events):
+    """Start collecting events and trigger abort mid-stream."""
+    task = asyncio.create_task(_collect_events(engine, prompt, events))
+    await asyncio.sleep(0.05)
+    abort_event.set()
+    await task
+
+
+async def _collect_events(engine, prompt, events):
+    async for event in engine.submit_message(prompt, is_meta=True):
+        events.append(event)

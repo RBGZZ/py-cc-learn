@@ -1,4 +1,4 @@
-# py-cc-learn &nbsp;`v0.6.0`
+# py-cc-learn &nbsp;`v0.7.0`
 
 > **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 311 tests
 
