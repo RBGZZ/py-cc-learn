@@ -230,6 +230,10 @@ async def csrf_middleware(request: Request, call_next):
     if request.url.path in ("/api/v1/health", "/api/v1/status"):
         return await call_next(request)
 
+    # Skip CSRF for API clients with Authorization header (non-browser)
+    if request.headers.get("Authorization"):
+        return await call_next(request)
+
     if request.method == "GET":
         response = await call_next(request)
         csrf_token = request.cookies.get("csrf_token")

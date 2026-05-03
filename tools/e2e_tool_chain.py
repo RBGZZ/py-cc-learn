@@ -37,18 +37,33 @@ async def test_chain(name: str, prompt: str, provider, tools: list):
         return False, str(e)
     elapsed = time.perf_counter() - start
 
-    tool_uses = [e for e in events if e.get("type") == "tool_use"]
+    tool_uses = [e for e in events if e.get("type") in ("tool_use",)]
     tool_results = [e for e in events if e.get("type") == "tool_result"]
+    assistant_events = [e for e in events if e.get("type") == "assistant"]
     texts = []
     for e in events:
         if e.get("type") == "text_delta":
-            texts.append(e.get("text", ""))
+            texts.append(e.get("text", "") or e.get("data", {}).get("text", ""))
         elif e.get("type") == "assistant":
-            content = e.get("message", {}).get("content", [])
-            if isinstance(content, list):
-                for b in content:
+            content = e.get("message", {}) or e.get("data", {}).get("message", {})
+            cb = content.get("content", []) if isinstance(content, dict) else e.get("data", {}).get("content", [])
+            if isinstance(cb, list):
+                for b in cb:
                     if isinstance(b, dict) and b.get("type") == "text":
                         texts.append(b.get("text", ""))
+            elif isinstance(cb, str):
+                texts.append(cb)
+
+    # Also detect tool use from assistant event content
+    if not tool_uses:
+        for ae in assistant_events:
+            data = ae.get("data", {})
+            msg = data.get("message", data)
+            content = msg.get("content", []) if isinstance(msg, dict) else []
+            if isinstance(content, list):
+                for b in content:
+                    if isinstance(b, dict) and b.get("type") == "tool_use":
+                        tool_uses.append(b)
 
     response = "".join(texts)[:200]
     print(f"  Tool calls: {len(tool_uses)}")
@@ -61,7 +76,7 @@ async def test_chain(name: str, prompt: str, provider, tools: list):
 
 async def main():
     provider_type = ProviderType.DEEPSEEK
-    for i, arg in enumerate(sys.argv):
+    for _i, arg in enumerate(sys.argv):
         if arg.startswith("--provider="):
             key = arg.split("=", 1)[1].strip().lower()
             provider_type = {

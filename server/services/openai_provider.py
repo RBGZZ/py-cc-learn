@@ -27,6 +27,11 @@ class OpenAIProvider(Provider):
             self.config.base_url = "https://api.openai.com"
         if not config.model:
             self.config.model = "gpt-4o"
+        # Cap max_tokens to reasonable default; OpenAI completion_tokens is output only
+        if config.max_tokens == 4096:
+            self.config.max_tokens = 4096  # Keep configured value
+        elif config.max_tokens > 16000:
+            self.config.max_tokens = 16000  # Cap for OpenAI compatibility
 
     def supports_thinking(self) -> bool:
         return False
@@ -50,6 +55,7 @@ class OpenAIProvider(Provider):
             "max_tokens": self.config.max_tokens,
             "temperature": self.config.temperature,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if tools:
             body["tools"] = self._convert_tools(tools)
@@ -307,6 +313,10 @@ class OpenAIProvider(Provider):
             )
 
         content_list.extend(tool_results)
+
+        # Yield individual tool_use events for compatibility with event-based consumers
+        for tr in tool_results:
+            yield StreamEvent(type="tool_use", data=tr)
 
         assistant_msg = {
             "message": {

@@ -354,6 +354,10 @@ def _get_context_window_for_model(model: str) -> int:
         return 128_000
     if "gpt-3.5" in model_lower:
         return 16_385
+    if "deepseek" in model_lower:
+        return 128_000
+    if "qwen" in model_lower:
+        return 128_000
     if "gemini" in model_lower:
         return 1_000_000
     if "claude-opus-4-6" in model_lower:
