@@ -50,6 +50,7 @@ TOKEN_BUDGET_RATIO = 0.9
 DIMINISHING_RETURNS_DELTA_THRESHOLD = 500
 DIMINISHING_RETURNS_CONSECUTIVE = 3
 ESCALATED_MAX_TOKENS = 64000
+CAPPED_DEFAULT_MAX_TOKENS = 8000
 
 
 class DynamicAbortController:
@@ -82,6 +83,8 @@ class QueryEngineConfig:
     abort_signal: asyncio.Event | None = None
     on_stream_event: Callable[[StreamEvent], Any] | None = None
     is_auto_compact_enabled: bool = True
+    feature_gates: dict[str, bool] = field(default_factory=dict)
+    user_context: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -100,6 +103,8 @@ class QueryState:
         }
     )
     _compact_boundary_index: int = 0
+    _has_attempted_collapse_drain: bool = False
+    _has_attempted_reactive_compact: bool = False
 
 
 class QueryEngine:
@@ -117,121 +122,67 @@ class QueryEngine:
                 for alias in t.aliases:
                     self._tool_map[alias] = t
         self._hooks: list[Callable[..., Any]] = []
+        self._task_hooks: list[Callable[..., Any]] = []
+        self._teammate_hooks: list[Callable[..., Any]] = []
 
     def register_hook(self, hook: Callable[..., Any]) -> None:
         self._hooks.append(hook)
 
-    async def submit_message(
-        self,
-        prompt: str | list[dict[str, Any]],
-        is_meta: bool = False,
-    ) -> AsyncGenerator[dict[str, Any], None]:
+    def register_task_hook(self, hook: Callable[..., Any]) -> None:
+        self._task_hooks.append(hook)
+
+    def register_teammate_hook(self, hook: Callable[..., Any]) -> None:
+        self._teammate_hooks.append(hook)
+
+    async def submit_message(self, prompt: str | list[dict[str, Any]], is_meta: bool = False) -> AsyncGenerator[dict[str, Any], None]:
         if self._abort.is_set():
-            yield {
-                "type": "result",
-                "subtype": "error_during_execution",
-                "stop_reason": QueryExitReason.CANCELLED_BY_USER.value,
-            }
+            yield {"type": "result", "subtype": "error_during_execution", "stop_reason": QueryExitReason.CANCELLED_BY_USER.value}
             return
 
         user_msg: dict[str, Any] = {
-            "type": "user",
-            "uuid": str(uuid.uuid4()),
-            "message": {
-                "role": "user",
-                "content": prompt if isinstance(prompt, str) else prompt,
-            },
+            "type": "user", "uuid": str(uuid.uuid4()),
+            "message": {"role": "user", "content": prompt if isinstance(prompt, str) else prompt},
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
         }
         self.state.messages.append(user_msg)
 
         if self.config.session_storage and not is_meta:
-            await self.config.session_storage.insert_message_chain(
-                [
-                    {
-                        "type": "user",
-                        "uuid": user_msg["uuid"],
-                        "message": user_msg["message"],
-                        "timestamp": user_msg["timestamp"],
-                    },
-                ]
-            )
+            await self.config.session_storage.insert_message_chain([{
+                "type": "user", "uuid": user_msg["uuid"], "message": user_msg["message"], "timestamp": user_msg["timestamp"],
+            }])
 
-        yield {
-            "type": "system_init",
-            "model": self.config.provider.get_default_model()
-            if self.config.provider
-            else "unknown",
-            "tools": [t.name for t in self._tools if hasattr(t, "name")],
-        }
+        yield {"type": "system_init", "model": self.config.provider.get_default_model() if self.config.provider else "unknown", "tools": [t.name for t in self._tools if hasattr(t, "name")]}
 
         stop_reason: str | None = None
-
         async for event in self._query_loop():
             event_type = event.get("type", "")
-
             if event_type == "assistant":
                 msg = event.get("data", event)
                 self.state.messages.append(msg)
-
                 if self.config.session_storage and not is_meta:
-                    await self.config.session_storage.insert_message_chain(
-                        [
-                            {
-                                "type": "assistant",
-                                "uuid": msg.get("uuid", str(uuid.uuid4())),
-                                "message": msg.get("message", msg),
-                                "timestamp": msg.get("timestamp"),
-                            },
-                        ]
-                    )
-
+                    await self.config.session_storage.insert_message_chain([{"type": "assistant", "uuid": msg.get("uuid", str(uuid.uuid4())), "message": msg.get("message", msg), "timestamp": msg.get("timestamp")}])
                 yield msg
-
             elif event_type == "stream_event":
                 if self.config.on_stream_event:
-                    self.config.on_stream_event(
-                        StreamEvent(
-                            type="stream_event",
-                            data=event.get("data", event),
-                        )
-                    )
+                    self.config.on_stream_event(StreamEvent(type="stream_event", data=event.get("data", event)))
                 yield event
-
             elif event_type == "text_delta":
-                delta = event.get("data", {}).get("text", "")
-                yield {"type": "text_delta", "text": delta}
-
+                yield {"type": "text_delta", "text": event.get("data", {}).get("text", "")}
             elif event_type == "error":
                 yield event
                 return
-
             elif event_type == "exit":
-                stop_reason = event.get("data", {}).get(
-                    "reason", QueryExitReason.COMPLETED.value
-                )
+                stop_reason = event.get("data", {}).get("reason", QueryExitReason.COMPLETED.value)
                 break
-
             elif event_type == "tool_result":
                 yield event
 
-        yield {
-            "type": "result",
-            "subtype": "success"
-            if stop_reason == QueryExitReason.COMPLETED.value
-            else "error_during_execution",
-            "stop_reason": stop_reason,
-            "turn_count": self.state.turn_count,
-            "usage": self.state.total_usage,
-        }
+        yield {"type": "result", "subtype": "success" if stop_reason == QueryExitReason.COMPLETED.value else "error_during_execution", "stop_reason": stop_reason, "turn_count": self.state.turn_count, "usage": self.state.total_usage}
 
     async def _query_loop(self) -> AsyncGenerator[dict[str, Any], None]:
         while self.state.turn_count < self.config.max_turns:
             if self._abort.is_set():
-                yield {
-                    "type": "exit",
-                    "data": {"reason": QueryExitReason.ABORTED_STREAMING.value},
-                }
+                yield {"type": "exit", "data": {"reason": QueryExitReason.ABORTED_STREAMING.value}}
                 return
 
             if self.state.turn_count > 0:
@@ -242,154 +193,108 @@ class QueryEngine:
 
             yield {"type": "stream_request_start", "data": {}}
 
+            streaming_fallback_occurred = False
+            self.state._has_attempted_collapse_drain = False
+            self.state._has_attempted_reactive_compact = False
             assistant_msgs: list[dict[str, Any]] = []
             tool_use_blocks: list[dict[str, Any]] = []
             needs_follow_up = False
+            current_model = self.config.fallback_model or ""
 
             abort_controller = DynamicAbortController(self._abort)
-            tool_use_context = type(
-                "ToolUseContext",
-                (),
-                {
-                    "options": type("Options", (), {"tools": self._tools})(),
-                    "abort_controller": abort_controller,
-                    "get_app_state": lambda: None,
-                    "set_app_state": lambda f: None,
-                },
-            )()
 
-            def _can_use_tool(*args: Any, **kwargs: Any) -> dict[str, str]:
-                return {"behavior": "allow"}
+            def _make_executor() -> StreamingToolExecutor:
+                tool_use_context = type("ToolUseContext", (), {"options": type("Options", (), {"tools": self._tools})(), "abort_controller": abort_controller, "get_app_state": lambda: None, "set_app_state": lambda f: None})()
+                def _can_use_tool(*args: Any, **kwargs: Any) -> dict[str, str]: return {"behavior": "allow"}
+                return StreamingToolExecutor(tool_definitions=self._tools, can_use_tool=_can_use_tool, tool_use_context=tool_use_context)
 
-            executor = StreamingToolExecutor(
-                tool_definitions=self._tools,
-                can_use_tool=_can_use_tool,
-                tool_use_context=tool_use_context,
-            )
+            executor = _make_executor()
 
-            async def _run_single_tool(
-                block: ToolUseBlock,
-                assistant_msg_obj: AssistantMessage,
-                can_use: Callable,
-                ctx: Any,
-            ) -> AsyncGenerator[dict[str, Any], None]:
+            async def _run_single_tool(block: ToolUseBlock, assistant_msg_obj: AssistantMessage, can_use: Callable, ctx: Any) -> AsyncGenerator[dict[str, Any], None]:
                 tool = self._tool_map.get(block.name)
                 if tool is None:
-                    error_block = _make_tool_result_block(
-                        block.id, f"Tool '{block.name}' not found", is_error=True
-                    )
-                    yield {
-                        "message": _make_user_message_dict(
-                            [error_block],
-                            f"Error: Tool '{block.name}' not found",
-                            assistant_msg_obj.uuid,
-                        ),
-                    }
+                    yield {"message": _make_user_message_dict([_make_tool_result_block(block.id, f"Tool '{block.name}' not found", is_error=True)], f"Error: Tool '{block.name}' not found", assistant_msg_obj.uuid)}
                     return
-
                 try:
                     result = await tool.call(block.input, ctx)
-                    if isinstance(result, dict):
-                        content_str = json.dumps(result, default=str)
-                    else:
-                        content_str = str(result)
-                    result_block = _make_tool_result_block(block.id, content_str)
-                    yield {
-                        "message": _make_user_message_dict(
-                            [result_block],
-                            content_str[:500],
-                            assistant_msg_obj.uuid,
-                        ),
-                    }
+                    content_str = json.dumps(result, default=str) if isinstance(result, dict) else str(result)
+                    yield {"message": _make_user_message_dict([_make_tool_result_block(block.id, content_str)], content_str[:500], assistant_msg_obj.uuid)}
                 except Exception as exc:
-                    error_block = _make_tool_result_block(
-                        block.id, str(exc), is_error=True
-                    )
-                    yield {
-                        "message": _make_user_message_dict(
-                            [error_block],
-                            str(exc)[:500],
-                            assistant_msg_obj.uuid,
-                        ),
-                    }
+                    yield {"message": _make_user_message_dict([_make_tool_result_block(block.id, str(exc), is_error=True)], str(exc)[:500], assistant_msg_obj.uuid)}
 
             executor.set_run_tool_use_fn(_run_single_tool)
 
-            try:
-                async for event in self._call_model():
-                    event_type = event.get("type", "")
+            _retry_count = 0
+            while True:
+                _retry_count += 1
+                if _retry_count > 2:
+                    break
 
-                    if event_type in ("assistant", "stream_event", "text_delta", "error"):
-                        yield event
+                try:
+                    async for event in self._call_model():
+                        event_type = event.get("type", "")
+                        if event_type in ("assistant", "stream_event", "text_delta", "error"):
+                            yield event
 
-                    if event_type == "assistant":
-                        msg = event.get("data", event)
-                        self._update_usage_from_msg(msg)
-                        assistant_msgs.append(msg)
+                        if event_type == "assistant":
+                            msg = event.get("data", event)
+                            self._update_usage_from_msg(msg)
+                            assistant_msgs.append(msg)
+                            if self._has_tool_use(msg):
+                                needs_follow_up = True
+                                tb = self._extract_tool_blocks(msg)
+                                tool_use_blocks.extend(tb)
+                                if not self._abort.is_set():
+                                    for tool_block in tb:
+                                        executor.add_tool(ToolUseBlock(id=tool_block.get("id", ""), name=tool_block.get("name", ""), input=self._parse_tool_input(tool_block.get("input", {}))), AssistantMessage(uuid=msg.get("uuid", str(uuid.uuid4()))))
 
-                        if self._has_tool_use(msg):
-                            needs_follow_up = True
-                            tb = self._extract_tool_blocks(msg)
-                            tool_use_blocks.extend(tb)
+                        if not self._abort.is_set():
+                            for completed in executor.get_completed_results():
+                                update_msg = completed.get("message")
+                                if update_msg is not None:
+                                    for ev in self._handle_tool_update(update_msg):
+                                        yield ev
 
-                            msg_uuid = msg.get("uuid", str(uuid.uuid4()))
-                            if not self._abort.is_set():
-                                for tool_block in tb:
-                                    executor.add_tool(
-                                        ToolUseBlock(
-                                            id=tool_block.get("id", ""),
-                                            name=tool_block.get("name", ""),
-                                            input=self._parse_tool_input(
-                                                tool_block.get("input", {})
-                                            ),
-                                        ),
-                                        AssistantMessage(uuid=msg_uuid),
-                                    )
+                        if event_type == "error":
+                            yield {"type": "exit", "data": {"reason": QueryExitReason.MODEL_ERROR.value}}
+                            return
 
-                    if not self._abort.is_set() and (
-                        event_type == "assistant" or event_type == "text_delta"
-                    ):
-                        for completed in executor.get_completed_results():
-                            update_msg = completed.get("message")
-                            if update_msg is not None:
-                                for ev in self._handle_tool_update(update_msg):
-                                    yield ev
+                    break  # success — exit retry loop
 
-                    if event_type == "error":
-                        yield {
-                            "type": "exit",
-                            "data": {"reason": QueryExitReason.MODEL_ERROR.value},
-                        }
+                except asyncio.CancelledError:
+                    for ev in self._yield_missing_tool_results(assistant_msgs, "Interrupted by user", None): yield ev
+                    yield _make_interruption_message()
+                    yield {"type": "exit", "data": {"reason": QueryExitReason.CANCELLED_BY_USER.value}}
+                    return
+                except StreamingFallbackError:
+                    if not self.config.fallback_model:
+                        yield {"type": "error", "data": {"message": "Streaming failed, no fallback model configured"}}
+                        yield {"type": "exit", "data": {"reason": QueryExitReason.MODEL_ERROR.value}}
+                        return
+                    streaming_fallback_occurred = True
+                    executor.discard()
+                    current_model = self.config.fallback_model
+                    self.config.provider.config.model = current_model
+                    assistant_msgs.clear()
+                    tool_use_blocks.clear()
+                    needs_follow_up = False
+                    executor = _make_executor()
+                    executor.set_run_tool_use_fn(_run_single_tool)
+                    yield {"type": "stream_event", "data": {"type": "system", "subtype": "streaming_fallback", "message": "Streaming connection lost — retrying..."}}
+                    continue
+                except Exception as exc:
+                    if not needs_follow_up and self.config.fallback_model:
+                        yield {"type": "stream_event", "data": {"type": "system", "subtype": "model_fallback", "fallback_model": self.config.fallback_model}}
+                        needs_follow_up = True
+                        break
+                    else:
+                        for ev in self._yield_missing_tool_results(assistant_msgs, f"Model error: {exc}", None): yield ev
+                        yield {"type": "error", "data": {"message": f"Model invocation failed: {exc}"}}
+                        yield {"type": "exit", "data": {"reason": QueryExitReason.MODEL_ERROR.value}}
                         return
 
-            except asyncio.CancelledError:
-                for ev in self._yield_missing_tool_results(assistant_msgs, "Interrupted by user", None):
-                    yield ev
-                yield _make_interruption_message()
-                yield {
-                    "type": "exit",
-                    "data": {"reason": QueryExitReason.CANCELLED_BY_USER.value},
-                }
-                return
-            except Exception as exc:
-                if not needs_follow_up and self.config.fallback_model:
-                    yield {
-                        "type": "stream_event",
-                        "data": {
-                            "type": "system",
-                            "subtype": "model_fallback",
-                            "fallback_model": self.config.fallback_model,
-                        },
-                    }
-                    needs_follow_up = True
-                else:
-                    for ev in self._yield_missing_tool_results(
-                        assistant_msgs, f"Model error: {exc}", None
-                    ):
-                        yield ev
-                    yield {"type": "error", "data": {"message": f"Model invocation failed: {exc}"}}
-                    yield {"type": "exit", "data": {"reason": QueryExitReason.MODEL_ERROR.value}}
-                    return
+            if streaming_fallback_occurred and not needs_follow_up:
+                needs_follow_up = True
 
             if assistant_msgs:
                 self._execute_post_sampling_hooks(assistant_msgs)
@@ -397,25 +302,32 @@ class QueryEngine:
             if self._abort.is_set():
                 executor.discard()
                 async for update in executor.get_remaining_results():
-                    update_msg = update.get("message")
-                    if update_msg is not None:
-                        for ev in self._handle_tool_update(update_msg):
-                            yield ev
-                for ev in self._yield_missing_tool_results(assistant_msgs, "Interrupted by user", None):
-                    yield ev
+                    if update.get("message") is not None:
+                        for ev in self._handle_tool_update(update["message"]): yield ev
+                for ev in self._yield_missing_tool_results(assistant_msgs, "Interrupted by user", None): yield ev
                 yield _make_interruption_message()
-                yield {
-                    "type": "exit",
-                    "data": {"reason": QueryExitReason.ABORTED_STREAMING.value},
-                }
+                yield {"type": "exit", "data": {"reason": QueryExitReason.ABORTED_STREAMING.value}}
                 return
 
             if needs_follow_up and tool_use_blocks:
                 async for update in executor.get_remaining_results():
-                    update_msg = update.get("message")
-                    if update_msg is not None:
-                        for ev in self._handle_tool_update(update_msg):
-                            yield ev
+                    if update.get("message") is not None:
+                        for ev in self._handle_tool_update(update["message"]): yield ev
+
+            self._execute_task_completed_hooks()
+            self._execute_teammate_idle_hooks()
+
+            if not needs_follow_up:
+                ptl_result = self._try_prompt_too_long_recovery(assistant_msgs)
+                if ptl_result == "retry":
+                    needs_follow_up = True
+                    assistant_msgs.clear()
+                    tool_use_blocks.clear()
+                    executor = _make_executor()
+                    executor.set_run_tool_use_fn(_run_single_tool)
+                elif ptl_result == "surface":
+                    yield {"type": "exit", "data": {"reason": QueryExitReason.PROMPT_TOO_LONG.value}}
+                    return
 
             if not needs_follow_up:
                 if self._check_token_budget_on_state():
@@ -425,124 +337,62 @@ class QueryEngine:
                     if handled:
                         needs_follow_up = True
                     else:
-                        yield {
-                            "type": "exit",
-                            "data": {
-                                "reason": QueryExitReason.MAX_OUTPUT_TOKENS_RECOVERIES.value,
-                            },
-                        }
+                        yield {"type": "exit", "data": {"reason": QueryExitReason.MAX_OUTPUT_TOKENS_RECOVERIES.value}}
                         return
 
                 stop_result = self._execute_stop_hooks()
                 if stop_result.get("prevent_continuation"):
-                    yield {
-                        "type": "exit",
-                        "data": {"reason": QueryExitReason.STOP_HOOK_PREVENTED.value},
-                    }
+                    yield {"type": "exit", "data": {"reason": QueryExitReason.STOP_HOOK_PREVENTED.value}}
                     return
                 if stop_result.get("blocking_errors"):
                     needs_follow_up = True
 
             if not needs_follow_up:
-                yield {
-                    "type": "exit",
-                    "data": {"reason": QueryExitReason.COMPLETED.value},
-                }
+                yield {"type": "exit", "data": {"reason": QueryExitReason.COMPLETED.value}}
                 return
 
             self.state.turn_count += 1
 
-        yield {
-            "type": "exit",
-            "data": {
-                "reason": QueryExitReason.MAX_TURNS.value,
-                "turn_count": self.state.turn_count,
-            },
-        }
+        yield {"type": "exit", "data": {"reason": QueryExitReason.MAX_TURNS.value, "turn_count": self.state.turn_count}}
 
     def _handle_tool_update(self, update_msg: Any) -> Generator[dict[str, Any], None, None]:
-        msg_type = (
-            update_msg.get("type")
-            if isinstance(update_msg, dict)
-            else getattr(update_msg, "type", None)
-        )
-
+        msg_type = update_msg.get("type") if isinstance(update_msg, dict) else getattr(update_msg, "type", None)
         if msg_type == "user":
-            msg_inner = (
-                update_msg.get("message")
-                if isinstance(update_msg, dict)
-                else getattr(update_msg, "message", None)
-            )
-
+            msg_inner = update_msg.get("message") if isinstance(update_msg, dict) else getattr(update_msg, "message", None)
             if msg_inner is not None:
-                inner_content = (
-                    msg_inner.get("content")
-                    if isinstance(msg_inner, dict)
-                    else getattr(msg_inner, "content", None)
-                )
+                inner_content = msg_inner.get("content") if isinstance(msg_inner, dict) else getattr(msg_inner, "content", None)
                 if inner_content is not None:
-                    user_result_msg: dict[str, Any] = {
-                        "type": "user",
-                        "uuid": str(uuid.uuid4()),
-                        "message": {
-                            "role": "user",
-                            "content": inner_content,
-                        },
-                        "timestamp": time.strftime(
-                            "%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()
-                        ),
-                    }
+                    user_result_msg: dict[str, Any] = {"type": "user", "uuid": str(uuid.uuid4()), "message": {"role": "user", "content": inner_content}, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())}
                     self.state.messages.append(user_result_msg)
-
                     if isinstance(inner_content, list):
                         for result_block in inner_content:
-                            yield {
-                                "type": "tool_result",
-                                "data": result_block,
-                            }
+                            yield {"type": "tool_result", "data": result_block}
                     elif isinstance(inner_content, dict):
-                        yield {
-                            "type": "tool_result",
-                            "data": inner_content,
-                        }
+                        yield {"type": "tool_result", "data": inner_content}
 
     async def _call_model(self) -> AsyncGenerator[dict[str, Any], None]:
         if not self.config.provider:
             yield {"type": "error", "data": {"message": "No provider configured"}}
             return
-
         messages_for_api = self._build_messages_for_api()
         tool_schemas = self._build_tool_schemas()
-        max_tokens = (
-            self.state.max_output_tokens_override
-            or getattr(self.config.provider.config, "max_tokens", 4096)
-        )
+        max_tokens = self.state.max_output_tokens_override or getattr(self.config.provider.config, "max_tokens", 4096)
         self.config.provider.config.max_tokens = max_tokens
-
-        async for event in self.config.provider.stream_chat(
-            messages=messages_for_api,
-            system_prompt=self._system_prompt,
-            tools=tool_schemas,
-        ):
+        async for event in self.config.provider.stream_chat(messages=messages_for_api, system_prompt=self._system_prompt, tools=tool_schemas):
             yield {"type": event.type, "data": event.data}
 
     def _build_messages_for_api(self) -> list[dict[str, Any]]:
         api_messages: list[dict[str, Any]] = []
         start_idx = self.state._compact_boundary_index
         for msg in self.state.messages[start_idx:]:
-            if msg.get("is_meta"):
+            if msg.get("is_meta") or msg.get("is_virtual"):
                 continue
-            if msg.get("is_virtual"):
-                continue
-            msg_type = msg.get("type", "")
-            if msg_type in ("user", "assistant"):
+            if msg.get("type", "") in ("user", "assistant"):
                 api_messages.append(self._normalize_api_message(msg))
         return self._merge_consecutive_user_messages(api_messages)
 
     @staticmethod
-    def _merge_consecutive_user_messages(
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
+    def _merge_consecutive_user_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         for msg in messages:
             if msg.get("type") == "user" and result and result[-1].get("type") == "user":
@@ -550,15 +400,14 @@ class QueryEngine:
                 prev_content = prev.get("message", prev).get("content", [])
                 cur_content = msg.get("message", msg).get("content", [])
                 if isinstance(prev_content, list) and isinstance(cur_content, list):
-                    merged_content = prev_content + cur_content
+                    merged = prev_content + cur_content
                 elif isinstance(prev_content, list):
-                    merged_content = prev_content + [cur_content]
+                    merged = prev_content + [cur_content]
                 elif isinstance(cur_content, list):
-                    merged_content = [prev_content] + cur_content
+                    merged = [prev_content] + cur_content
                 else:
-                    merged_content = [prev_content, cur_content]
-                prev_msg_data = prev.get("message", prev)
-                prev["message"] = {**prev_msg_data, "content": merged_content}
+                    merged = [prev_content, cur_content]
+                prev["message"] = {**prev.get("message", prev), "content": merged}
             else:
                 result.append(msg)
         return result
@@ -569,133 +418,91 @@ class QueryEngine:
         content = msg_data.get("content", [])
         if not isinstance(content, list):
             return msg
-        cleaned: list[dict[str, Any]] = []
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            block_type = block.get("type", "")
-            if block_type in ("text", "tool_use", "tool_result", "thinking"):
-                cleaned.append(block)
+        cleaned = [b for b in content if isinstance(b, dict) and b.get("type", "") in ("text", "tool_use", "tool_result", "thinking")]
         if not cleaned:
-            cleaned.append({"type": "text", "text": ""})
-        result = dict(msg)
-        result["message"] = {
-            **msg_data,
-            "content": cleaned,
-        }
-        return result
+            cleaned = [{"type": "text", "text": ""}]
+        return {**msg, "message": {**msg_data, "content": cleaned}}
 
     def _build_tool_schemas(self) -> list[dict[str, Any]]:
         schemas: list[dict[str, Any]] = []
         for tool in self._tools:
-            schema: dict[str, Any] = {
-                "name": getattr(tool, "name", ""),
-                "description": getattr(tool, "search_hint", "") or "",
-            }
+            schema: dict[str, Any] = {"name": getattr(tool, "name", ""), "description": getattr(tool, "search_hint", "") or ""}
             input_schema = getattr(tool, "input_schema", None)
             if input_schema:
                 try:
-                    if hasattr(input_schema, "model_json_schema"):
-                        schema["input_schema"] = input_schema.model_json_schema()
-                    else:
-                        schema["input_schema"] = None
+                    schema["input_schema"] = input_schema.model_json_schema() if hasattr(input_schema, "model_json_schema") else None
                 except Exception:
                     schema["input_schema"] = None
             schemas.append(schema)
         return schemas
 
     def _has_tool_use(self, msg: dict[str, Any]) -> bool:
-        msg_data = msg.get("message", msg)
-        content = msg_data.get("content", [])
-        if isinstance(content, list):
-            return any(
-                block.get("type") == "tool_use"
-                for block in content
-                if isinstance(block, dict)
-            )
-        return False
+        content = msg.get("message", msg).get("content", [])
+        return isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content)
 
     @staticmethod
     def _extract_tool_blocks(msg: dict[str, Any]) -> list[dict[str, Any]]:
-        msg_data = msg.get("message", msg)
-        content = msg_data.get("content", [])
-        if not isinstance(content, list):
-            return []
-        return [
-            b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"
-        ]
+        content = msg.get("message", msg).get("content", [])
+        return [b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"] if isinstance(content, list) else []
 
     @staticmethod
-    def _is_max_output_tokens_from_msgs(assistant_msgs: list[dict[str, Any]]) -> bool:
-        for msg in assistant_msgs:
-            msg_data = msg.get("message", msg)
-            stop_reason = msg_data.get("stop_reason", "")
-            if stop_reason in ("max_tokens", "length"):
-                return True
-        return False
+    def _is_max_output_tokens_from_msgs(msgs: list[dict[str, Any]]) -> bool:
+        return any(msg.get("message", msg).get("stop_reason", "") in ("max_tokens", "length") for msg in msgs)
 
     def _handle_max_output_tokens_recovery(self) -> bool:
         if self.state.max_output_tokens_recovery_count >= MAX_OUTPUT_TOKENS_RECOVERY_LIMIT:
             return False
-
-        if (
-            self.state.max_output_tokens_override is None
-            and self.state.max_output_tokens_recovery_count == 0
-        ):
-            self.state.max_output_tokens_override = ESCALATED_MAX_TOKENS
-            self.state.max_output_tokens_recovery_count = 1
-            return True
-
+        if self.state.max_output_tokens_override is None and self.state.max_output_tokens_recovery_count == 0:
+            cap_enabled = self.config.feature_gates.get("tengu_otk_slot_v1", False)
+            if cap_enabled:
+                self.state.max_output_tokens_override = ESCALATED_MAX_TOKENS
+                self.state.max_output_tokens_recovery_count = 1
+                return True
         self.state.max_output_tokens_recovery_count += 1
-        recovery_msg: dict[str, Any] = {
-            "type": "user",
-            "uuid": str(uuid.uuid4()),
-            "message": {
-                "role": "user",
-                "content": (
-                    "Output token limit hit. Resume directly — no apology, "
-                    "no recap of what you were doing. Pick up mid-thought if "
-                    "that is where the cut happened. Break remaining work "
-                    "into smaller pieces."
-                ),
-            },
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
-            "is_meta": True,
-        }
-        self.state.messages.append(recovery_msg)
+        self.state.messages.append({"type": "user", "uuid": str(uuid.uuid4()), "message": {"role": "user", "content": "Output token limit hit. Resume directly — no apology, no recap of what you were doing. Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces."}, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()), "is_meta": True})
         return True
 
-    def _yield_missing_tool_results(
-        self,
-        assistant_msgs: list[dict[str, Any]],
-        error_message: str,
-        _executor: Any,
-    ) -> Generator[dict[str, Any], None, None]:
+    def _yield_missing_tool_results(self, assistant_msgs: list[dict[str, Any]], error_message: str, _executor: Any) -> Generator[dict[str, Any], None, None]:
         for assistant_msg in assistant_msgs:
-            tool_blocks = self._extract_tool_blocks(assistant_msg)
-            for tb in tool_blocks:
-                error_block = _make_tool_result_block(
-                    tb.get("id", ""), error_message, is_error=True
-                )
-                user_result_msg: dict[str, Any] = {
-                    "type": "user",
-                    "uuid": str(uuid.uuid4()),
-                    "message": {
-                        "role": "user",
-                        "content": [error_block],
-                    },
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
-                }
-                self.state.messages.append(user_result_msg)
-                yield {
-                    "type": "tool_result",
-                    "data": error_block,
-                }
+            for tb in self._extract_tool_blocks(assistant_msg):
+                error_block = _make_tool_result_block(tb.get("id", ""), error_message, is_error=True)
+                self.state.messages.append({"type": "user", "uuid": str(uuid.uuid4()), "message": {"role": "user", "content": [error_block]}, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())})
+                yield {"type": "tool_result", "data": error_block}
+
+    def _try_prompt_too_long_recovery(self, assistant_msgs: list[dict[str, Any]]) -> str | None:
+        withheld = self._is_withheld_prompt_too_long(assistant_msgs)
+        if not withheld:
+            return None
+        if not self.state._has_attempted_collapse_drain:
+            self.state._has_attempted_collapse_drain = True
+            return "retry"
+        if not self.state._has_attempted_reactive_compact:
+            self.state._has_attempted_reactive_compact = True
+            self._try_reactive_compact()
+            return "retry"
+        return "surface"
+
+    @staticmethod
+    def _is_withheld_prompt_too_long(assistant_msgs: list[dict[str, Any]]) -> bool:
+        for msg in assistant_msgs:
+            inner = msg.get("message", msg)
+            if inner.get("type") == "assistant" and inner.get("is_api_error_message"):
+                content = inner.get("content", [])
+                if isinstance(content, list) and content and isinstance(content[0], dict):
+                    if "prompt too long" in str(content[0].get("text", "")).lower():
+                        return True
+        return False
+
+    def _try_reactive_compact(self) -> None:
+        try:
+            self.state._compact_boundary_index = max(0, len(self.state.messages) // 2)
+        except Exception:
+            pass
 
     def _execute_post_sampling_hooks(self, assistant_msgs: list[dict[str, Any]]) -> None:
         for hook in self._hooks:
             with contextlib.suppress(Exception):
-                hook("post_sampling", {"assistant_msgs": assistant_msgs})
+                hook("post_sampling", {"assistant_msgs": assistant_msgs, "system_prompt": self._system_prompt, "user_context": self.config.user_context})
 
     def _execute_stop_hooks(self) -> dict[str, Any]:
         result: dict[str, Any] = {"prevent_continuation": False, "blocking_errors": []}
@@ -703,54 +510,45 @@ class QueryEngine:
             with contextlib.suppress(Exception):
                 hook_result = hook("stop", {"turn_count": self.state.turn_count})
                 if isinstance(hook_result, dict):
-                    if hook_result.get("prevent_continuation"):
-                        result["prevent_continuation"] = True
+                    if hook_result.get("prevent_continuation"): result["prevent_continuation"] = True
                     blocking = hook_result.get("blocking_errors")
-                    if blocking:
-                        result["blocking_errors"].extend(
-                            blocking if isinstance(blocking, list) else [blocking]
-                        )
+                    if blocking: result["blocking_errors"].extend(blocking if isinstance(blocking, list) else [blocking])
         return result
+
+    def _execute_task_completed_hooks(self) -> None:
+        for hook in self._task_hooks:
+            with contextlib.suppress(Exception):
+                hook("task_completed", {"turn_count": self.state.turn_count})
+
+    def _execute_teammate_idle_hooks(self) -> None:
+        for hook in self._teammate_hooks:
+            with contextlib.suppress(Exception):
+                hook("teammate_idle", {"turn_count": self.state.turn_count})
 
     @staticmethod
     def _parse_tool_input(raw_input: Any) -> dict[str, Any]:
-        if isinstance(raw_input, dict):
-            return raw_input
+        if isinstance(raw_input, dict): return raw_input
         if isinstance(raw_input, str):
-            try:
-                return json.loads(raw_input)
-            except json.JSONDecodeError:
-                return {}
+            try: return json.loads(raw_input)
+            except json.JSONDecodeError: return {}
         return {}
 
     def _check_auto_compact(self) -> str | None:
-        if not self.config.is_auto_compact_enabled:
-            return None
-
+        if not self.config.is_auto_compact_enabled: return None
         estimated_tokens = self._compute_estimated_tokens()
-
-        if estimated_tokens < AUTO_COMPACT_TOKEN_THRESHOLD:
-            return None
-
-        snip_result = self._try_snip_compact()
-        mc_result = self._try_microcompact()
-        tokens_freed = snip_result + mc_result
+        if estimated_tokens < AUTO_COMPACT_TOKEN_THRESHOLD: return None
+        tokens_freed = self._try_snip_compact() + self._try_microcompact()
         if tokens_freed > 0:
             self.state._compact_boundary_index = max(0, len(self.state.messages) - 20)
-
-        new_estimate = self._compute_estimated_tokens()
-        if new_estimate >= AUTO_COMPACT_TOKEN_THRESHOLD:
+        if self._compute_estimated_tokens() >= AUTO_COMPACT_TOKEN_THRESHOLD:
             return QueryExitReason.BLOCKING_LIMIT.value
-
         return None
 
     def _try_snip_compact(self) -> int:
         msgs = self.state.messages
-        if len(msgs) <= 30:
-            return 0
-        keep_turns = 20
+        if len(msgs) <= 30: return 0
         removed = 0
-        for i in range(len(msgs) - keep_turns):
+        for i in range(len(msgs) - 20):
             if msgs[i].get("type") in ("user", "assistant"):
                 msgs[i] = {**msgs[i], "_snipped": True}
                 removed += 1
@@ -759,50 +557,34 @@ class QueryEngine:
     def _try_microcompact(self) -> int:
         try:
             from server.services.compact import microcompact_messages
-            result = microcompact_messages(self.state.messages)
-            tokens_saved = result.get("tokens_saved", 0)
-            return int(tokens_saved)
+            return int(microcompact_messages(self.state.messages).get("tokens_saved", 0))
         except Exception:
             return 0
 
     def _compute_estimated_tokens(self) -> int:
         usage = self.state.total_usage
         api_estimate = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
-        if api_estimate > 0:
-            return api_estimate
-
+        if api_estimate > 0: return api_estimate
         total_chars = 0
         for msg in self.state.messages:
-            msg_data = msg.get("message", msg)
-            content = msg_data.get("content", "")
+            content = msg.get("message", msg).get("content", "")
             if isinstance(content, str):
                 total_chars += len(content)
             elif isinstance(content, list):
-                total_chars += sum(
-                    len(str(block.get("text", block.get("content", ""))))
-                    for block in content
-                    if isinstance(block, dict)
-                )
+                total_chars += sum(len(str(b.get("text", b.get("content", "")))) for b in content if isinstance(b, dict))
         return max(1, int(total_chars * 0.25))
 
     def _check_token_budget_on_state(self) -> bool:
-        usage = self.state.total_usage
-        return self._check_token_budget(usage)
+        return self._check_token_budget(self.state.total_usage)
 
     def _check_token_budget(self, usage: dict[str, Any]) -> bool:
-        total_context = usage.get("input_tokens", 0)
-        max_context = 200_000
-
-        if total_context >= max_context * TOKEN_BUDGET_RATIO:
-            output_tokens = usage.get("output_tokens", 0)
-            if output_tokens < DIMINISHING_RETURNS_DELTA_THRESHOLD:
+        if usage.get("input_tokens", 0) >= 200_000 * TOKEN_BUDGET_RATIO:
+            if usage.get("output_tokens", 0) < DIMINISHING_RETURNS_DELTA_THRESHOLD:
                 self.state.consecutive_low_output_count += 1
             else:
                 self.state.consecutive_low_output_count = 0
-
             if self.state.consecutive_low_output_count >= DIMINISHING_RETURNS_CONSECUTIVE:
                 return True
-
         return False
 
     def interrupt(self) -> None:
@@ -815,54 +597,24 @@ class QueryEngine:
         return dict(self.state.total_usage)
 
     def _update_usage(self, usage: dict[str, Any]) -> None:
-        if usage.get("input_tokens"):
-            self.state.total_usage["input_tokens"] += usage["input_tokens"]
-        if usage.get("output_tokens"):
-            self.state.total_usage["output_tokens"] += usage["output_tokens"]
-        if usage.get("cache_creation_input_tokens"):
-            self.state.total_usage["cache_creation_input_tokens"] += usage[
-                "cache_creation_input_tokens"
-            ]
-        if usage.get("cache_read_input_tokens"):
-            self.state.total_usage["cache_read_input_tokens"] += usage["cache_read_input_tokens"]
+        for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"):
+            if usage.get(k):
+                self.state.total_usage[k] += usage[k]
 
     def _update_usage_from_msg(self, msg: dict[str, Any]) -> None:
-        msg_data = msg.get("message", msg)
-        usage = msg_data.get("usage", {})
-        if usage:
-            self._update_usage(usage)
+        usage = msg.get("message", msg).get("usage", {})
+        if usage: self._update_usage(usage)
 
 
-def _make_tool_result_block(
-    tool_use_id: str, content: str, is_error: bool = False
-) -> dict[str, Any]:
-    return {
-        "type": "tool_result",
-        "tool_use_id": tool_use_id,
-        "content": content,
-        "is_error": is_error,
-    }
+class StreamingFallbackError(RuntimeError):
+    """Raised when the streaming connection fails and needs fallback. Source: query.ts L678-741."""
 
 
-def _make_user_message_dict(
-    content: list[dict[str, Any]], tool_use_result: str, source_uuid: str
-) -> dict[str, Any]:
-    return {
-        "type": "user",
-        "message": {"type": "user", "content": content},
-        "tool_use_result": tool_use_result,
-        "source_tool_assistant_uuid": source_uuid,
-    }
+def _make_tool_result_block(tool_use_id: str, content: str, is_error: bool = False) -> dict[str, Any]:
+    return {"type": "tool_result", "tool_use_id": tool_use_id, "content": content, "is_error": is_error}
 
+def _make_user_message_dict(content: list[dict[str, Any]], tool_use_result: str, source_uuid: str) -> dict[str, Any]:
+    return {"type": "user", "message": {"type": "user", "content": content}, "tool_use_result": tool_use_result, "source_tool_assistant_uuid": source_uuid}
 
 def _make_interruption_message() -> dict[str, Any]:
-    return {
-        "type": "user",
-        "uuid": str(uuid.uuid4()),
-        "message": {
-            "role": "user",
-            "content": [{"type": "text", "text": "Interrupted by user"}],
-        },
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
-        "is_meta": True,
-    }
+    return {"type": "user", "uuid": str(uuid.uuid4()), "message": {"role": "user", "content": [{"type": "text", "text": "Interrupted by user"}]}, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()), "is_meta": True}

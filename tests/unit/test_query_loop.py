@@ -228,12 +228,23 @@ class TestMaxOutputTokensRecovery:
         assert QueryEngine._is_max_output_tokens_from_msgs(msgs) is False
 
     def test_recovery_escalate_first(self):
-        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        engine = QueryEngine(QueryEngineConfig(
+            tools=[], system_prompt="test", feature_gates={"tengu_otk_slot_v1": True}
+        ))
         result = engine._handle_max_output_tokens_recovery()
         assert result is True
         assert engine.state.max_output_tokens_override == 64000
         assert engine.state.max_output_tokens_recovery_count == 1
         assert len(engine.state.messages) == 0
+
+    def test_recovery_escalate_gated(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        result = engine._handle_max_output_tokens_recovery()
+        assert result is True
+        assert engine.state.max_output_tokens_override is None
+        assert engine.state.max_output_tokens_recovery_count == 1
+        assert len(engine.state.messages) == 1
+        assert engine.state.messages[0]["is_meta"] is True
 
     def test_recovery_second_injects_meta_message(self):
         engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
