@@ -10,7 +10,8 @@
 
 | 版本 | 状态 | 说明 |
 |------|------|------|
-| `v0.5.0` | ✅ 最新 | 安全加固：Shell注入修复/tree-sitter AST/权限检查/Docker加固/KDF/CSRF，安全评分 ≥90/100 |
+| `v0.6.0` | ✅ 最新 | 生产验证：Docker部署 / 多轮工具链路 / Caching对比 / 负载压测 |
+| `v0.5.0` | ✅ 已发布 | 安全加固：Shell注入修复/tree-sitter AST/权限检查/Docker加固/KDF/CSRF |
 | `v0.4.0` | ✅ 已发布 | 需求评审系统 + MCP 完整集成 (SSE/HTTP/OAuth/连接管理/权限) |
 | `v0.3.5` | ✅ 已发布 | 性能全面完善：Token Budget重写 / Prompt Caching / Extended Thinking / P1修复 |
 | `v0.3.4` | ✅ 已发布 | 性能测试缺口补齐 + 深度性能审计（43 gaps, 14 P0 已修复） |
@@ -185,8 +186,9 @@ py-cc-learn/
 | Phase 20 | 性能全面完善 (TokenBudget/PromptCaching/ExtendedThinking/P1修复) | ✅ |
 | Phase 21 | 需求评审 + MCP 完整集成 + 可选完善 | ✅ |
 | Phase 22 | 生产就绪发布 (RUNBOOK/审计/安全加固/311 tests) | ✅ |
+| Phase 23 | 生产验证：Docker部署/多轮工具链/Caching/负载压测 | ✅ |
 
-**105/105 Task 完成 · 414/414 Checklist 通过 · 311 tests passed · v0.5.0**
+**118/118 Task 完成 · 437/437 Checklist 通过 · 311 tests passed · v0.6.0**
 
 ---
 

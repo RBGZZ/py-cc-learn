@@ -1,0 +1,58 @@
+{
+  "model": "deepseek-v4-flash",
+  "caching_off": [
+    {
+      "round": 1,
+      "ttft_ms": 2290.0,
+      "total_ms": 2290.8,
+      "input_tokens": 19,
+      "output_tokens": 113
+    },
+    {
+      "round": 2,
+      "ttft_ms": 2038.2,
+      "total_ms": 2039.0,
+      "input_tokens": 19,
+      "output_tokens": 113
+    },
+    {
+      "round": 3,
+      "ttft_ms": 2241.4,
+      "total_ms": 2241.9,
+      "input_tokens": 19,
+      "output_tokens": 132
+    }
+  ],
+  "caching_on": [
+    {
+      "round": 1,
+      "ttft_ms": 2308.9,
+      "total_ms": 2309.4,
+      "input_tokens": 19,
+      "output_tokens": 127
+    },
+    {
+      "round": 2,
+      "ttft_ms": 2789.3,
+      "total_ms": 2789.9,
+      "input_tokens": 19,
+      "output_tokens": 164
+    },
+    {
+      "round": 3,
+      "ttft_ms": 2076.1,
+      "total_ms": 2076.7,
+      "input_tokens": 19,
+      "output_tokens": 109
+    }
+  ],
+  "summary": {
+    "avg_input_off": 19,
+    "avg_input_on": 19,
+    "tokens_saved": 0,
+    "token_save_pct": 0.0,
+    "avg_ttft_off_ms": 2189.9,
+    "avg_ttft_on_ms": 2391.4,
+    "ttft_improvement_ms": -201.6
+  }
+}
