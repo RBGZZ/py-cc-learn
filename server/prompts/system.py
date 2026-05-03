@@ -12,6 +12,21 @@ CYBER_RISK_INSTRUCTION = (
 
 SYSTEM_PROMPT_DYNAMIC_BOUNDARY = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__"
 
+MCP_PROMPT_SECTION = """
+## MCP Tools
+You have access to tools provided by MCP (Model Context Protocol) servers. MCP tools are prefixed with `mcp__<server>__`. Use them when the task requires capabilities provided by connected MCP servers.
+- To see available MCP resources, use the ListMcpResourcesTool
+- To read an MCP resource, use ReadMcpResourceTool with the resource URI
+"""
+
+REVIEW_INSTRUCTIONS = """
+## Requirement Review
+When asked to review a requirements document or specification:
+- Use the Review tool to perform structured analysis
+- The review covers: completeness, consistency, quality, and risk assessment
+- Provide actionable recommendations based on the review output
+"""
+
 _FRONTIER_MODEL_NAME = "Claude Opus 4.6"
 
 _CLAUDE_4_5_OR_4_6_MODEL_IDS = {
@@ -512,6 +527,8 @@ def get_system_prompt(
         _get_simple_doing_tasks_section(),
         _get_actions_section(),
         _get_using_your_tools_section(enabled_tool_names),
+        MCP_PROMPT_SECTION.strip(),
+        REVIEW_INSTRUCTIONS.strip(),
         _get_tone_and_style_section(),
         _get_output_efficiency_section(),
         # --- BOUNDARY MARKER ---

@@ -5,6 +5,8 @@ from typing import Any
 
 from server.tools.tool import Tool, tool_matches_name
 
+_mcp_manager = None
+
 _BASH_TOOL_NAME = "Bash"
 _FILE_READ_TOOL_NAME = "Read"
 _FILE_EDIT_TOOL_NAME = "Edit"
@@ -189,3 +191,25 @@ def assemble_tool_pool_from_callables(
         mcp_tools=mcp_tools,
         all_base_tools=built_in_tools_fn(),
     )
+
+
+def _get_base_tools() -> list[Tool]:
+    return []
+
+
+def set_mcp_manager(manager):
+    global _mcp_manager
+    _mcp_manager = manager
+
+
+def get_all_tools():
+    tools = _get_base_tools()
+    try:
+        from server.tools.review_tool import ReviewTool
+        tools.append(ReviewTool())
+    except ImportError:
+        pass
+    if _mcp_manager is not None:
+        mcp_tools = _mcp_manager.list_tools()
+        tools.extend(mcp_tools)
+    return tools

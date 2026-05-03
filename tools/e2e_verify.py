@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 
 from dotenv import load_dotenv
@@ -19,6 +20,14 @@ PROVIDER_MAP = {
     "deepseek": ProviderType.DEEPSEEK,
     "google": ProviderType.GOOGLE,
     "qwen": ProviderType.QWEN,
+}
+
+PROVIDER_API_KEY_ENV = {
+    ProviderType.ANTHROPIC: "ANTHROPIC_API_KEY",
+    ProviderType.OPENAI: "OPENAI_API_KEY",
+    ProviderType.DEEPSEEK: "DEEPSEEK_API_KEY",
+    ProviderType.GOOGLE: "GOOGLE_API_KEY",
+    ProviderType.QWEN: "QWEN_API_KEY",
 }
 
 
@@ -53,6 +62,13 @@ async def main():
         if provider_type is None:
             print(f"Unknown provider: {key}. Options: {list(PROVIDER_MAP)}")
             return
+
+    if provider_type is not None:
+        env_var = PROVIDER_API_KEY_ENV.get(provider_type)
+        if env_var and not os.environ.get(env_var):
+            print(f"SKIP: {env_var} not set")
+            return
+
     try:
         ok = await test_single_turn(provider_type)
         print(f"\nPASS: E2E single-turn verification")
