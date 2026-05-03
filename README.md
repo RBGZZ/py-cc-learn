@@ -1,6 +1,6 @@
-# py-cc-learn &nbsp;`v0.3.0`
+# py-cc-learn &nbsp;`v0.3.1`
 
-> **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; ⚠️ 预发布版本，仍在积极开发中
+> **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 238 tests
 
 基于 [Claude Code Haha](https://github.com/anthropics/claude-code) 源码，使用 **Python 3.12+** (FastAPI) + **Vue 3** (Vite) 完整重写，支持多厂商模型后端。
 
