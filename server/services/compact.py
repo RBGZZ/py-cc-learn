@@ -26,6 +26,11 @@ COMPACTABLE_TOOL_NAMES = {
     "edit",
     "filewrite",
     "write",
+    "lstool",
+    "task",
+    "todowrite",
+    "notebookread",
+    "notebookedit",
 }
 
 # === Auto-Compact Constants ===
@@ -475,6 +480,7 @@ async def auto_compact_if_needed(
             "compact_metadata": {
                 "trigger": "auto",
                 "pre_compact_token_count": token_utils.token_count_with_estimation(messages, model),
+                "post_compact_summary_tokens": rough_token_count(formatted_summary) if formatted_summary else 0,
             },
         }
 
@@ -490,6 +496,55 @@ async def auto_compact_if_needed(
         prev_failures = tracking.get("consecutive_failures", 0) if tracking else 0
         next_failures = prev_failures + 1
         return {"was_compacted": False, "consecutive_failures": next_failures}
+
+
+async def reactive_compact(
+    messages: list[dict[str, Any]],
+    tool_use_context: dict[str, Any],
+) -> dict[str, Any]:
+    """Re-compact after a compact failure. Uses the same prompt but with reactive flag."""
+    import os
+    if os.environ.get("DISABLE_COMPACT", "").lower() in ("1", "true"):
+        return {"was_compacted": False}
+
+    compact_prompt = get_compact_prompt()
+    summary_request = {
+        "type": "user",
+        "message": {"role": "user", "content": compact_prompt},
+    }
+
+    model = tool_use_context.get("options", {}).get(
+        "main_loop_model", "claude-sonnet-4-20250514"
+    )
+    summary = await _stream_compact_summary(messages, summary_request, tool_use_context, model)
+
+    if not summary:
+        return {"was_compacted": False}
+
+    formatted_summary = format_compact_summary(summary)
+    boundary_marker = {
+        "type": "system",
+        "subtype": "compact_boundary",
+        "compact_metadata": {
+            "trigger": "reactive",
+        },
+    }
+    return {
+        "boundary_marker": boundary_marker,
+        "summary": formatted_summary,
+        "was_compacted": True,
+    }
+
+
+async def context_collapse(
+    messages: list[dict[str, Any]],
+    tool_use_context: dict[str, Any],
+) -> dict[str, Any]:
+    """Collapse context when enabled via CLAUDE_CODE_CONTEXT_COLLAPSE env var."""
+    import os
+    if os.environ.get("CLAUDE_CODE_CONTEXT_COLLAPSE", "").lower() not in ("1", "true"):
+        return {"was_compacted": False}
+    return await reactive_compact(messages, tool_use_context)
 
 
 # === Post-Compact Recovery ===
@@ -638,6 +693,9 @@ async def _stream_compact_summary(
     provider = tool_use_context.get("_provider")
     if provider is None:
         return None
+
+    if hasattr(provider, 'config'):
+        provider.config.max_tokens = COMPACT_MAX_OUTPUT_TOKENS
 
     system_prompt = "You are a helpful AI assistant tasked with summarizing conversations."
 

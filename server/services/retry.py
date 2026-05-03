@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from server.services.errors import (
@@ -49,7 +50,7 @@ FOREGROUND_529_RETRY_SOURCES = {
 }
 
 
-class CircuitState(str, Enum):
+class CircuitState(StrEnum):
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
@@ -103,10 +104,73 @@ class CircuitBreaker:
             self._failure_count += 1
             self._last_failure_time = time.monotonic()
             if self._failure_count >= self.config.failure_threshold:
-                if self._state == CircuitState.CLOSED:
+                if self._state == CircuitState.CLOSED or self._state == CircuitState.HALF_OPEN:
                     self._state = CircuitState.OPEN
-                elif self._state == CircuitState.HALF_OPEN:
-                    self._state = CircuitState.OPEN
+
+
+def is_oauth_token_revoked_error(error: Exception) -> bool:
+    status = None
+    for attr in ("status_code", "status", "http_status"):
+        val = getattr(error, attr, None)
+        if isinstance(val, int):
+            status = val
+            break
+    if status != 403:
+        return False
+    msg = str(error).lower()
+    return "oauth token has been revoked" in msg
+
+
+def is_bedrock_auth_error(error: Exception) -> bool:
+    if os.environ.get("CLAUDE_CODE_USE_BEDROCK", "").lower() not in ("1", "true"):
+        return False
+    msg = str(error)
+    if "credential" in msg.lower() and ("expired" in msg.lower() or "invalid" in msg.lower()):
+        return True
+    status = None
+    for attr in ("status_code", "status", "http_status"):
+        val = getattr(error, attr, None)
+        if isinstance(val, int):
+            status = val
+            break
+    return status == 403
+
+
+def is_vertex_auth_error(error: Exception) -> bool:
+    if os.environ.get("CLAUDE_CODE_USE_VERTEX", "").lower() not in ("1", "true"):
+        return False
+    msg = str(error).lower()
+    if any(phrase in msg for phrase in (
+        "could not load the default credentials",
+        "could not refresh access token",
+        "invalid_grant",
+    )):
+        return True
+    status = None
+    for attr in ("status_code", "status", "http_status"):
+        val = getattr(error, attr, None)
+        if isinstance(val, int):
+            status = val
+            break
+    return status == 401 or status == 403
+
+
+def handle_aws_credential_error(error: Exception) -> bool:
+    if is_bedrock_auth_error(error):
+        for key in list(os.environ.keys()):
+            if key.startswith("AWS_") and key.endswith("_CACHE"):
+                os.environ.pop(key, None)
+        return True
+    return False
+
+
+def handle_gcp_credential_error(error: Exception) -> bool:
+    if is_vertex_auth_error(error):
+        for key in list(os.environ.keys()):
+            if key.startswith("GOOGLE_") and key.endswith("_CACHE"):
+                os.environ.pop(key, None)
+        return True
+    return False
 
 
 def is_stale_connection_error(error: Exception) -> bool:
@@ -181,6 +245,19 @@ def should_retry(error: Exception) -> bool:
     if is_transient_capacity_error(error):
         return True
 
+    headers = getattr(error, "headers", None)
+    if headers is not None:
+        should_retry_val = None
+        if hasattr(headers, "get") or isinstance(headers, dict):
+            should_retry_val = headers.get("x-should-retry")
+        if should_retry_val is not None:
+            if should_retry_val in (False, "false", "False"):
+                status = getattr(error, "status_code", None) or getattr(error, "status", None)
+                if not (isinstance(status, int) and status >= 500):
+                    return False
+            elif should_retry_val in (True, "true", "True"):
+                return True
+
     if is_529_error(error):
         return True
 
@@ -212,10 +289,7 @@ def should_retry(error: Exception) -> bool:
         if status >= 500:
             return True
 
-    if "connection" in msg or "timeout" in msg:
-        return True
-
-    return False
+    return bool("connection" in msg or "timeout" in msg)
 
 
 async def with_retry(

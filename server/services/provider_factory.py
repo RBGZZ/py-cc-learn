@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
 
 import httpx
 
@@ -8,12 +10,12 @@ from server.services.anthropic_provider import AnthropicProvider
 from server.services.deepseek_provider import DeepSeekProvider
 from server.services.google_provider import GoogleProvider
 from server.services.openai_provider import OpenAIProvider
-from server.services.qwen_provider import QwenProvider
 from server.services.provider import (
     Provider,
     ProviderConfig,
     ProviderType,
 )
+from server.services.qwen_provider import QwenProvider
 from server.services.retry import (
     CircuitBreaker,
     CircuitBreakerConfig,
@@ -73,6 +75,20 @@ class ProviderFactory:
         return cls._http_client
 
     @classmethod
+    async def _preconnect(cls) -> None:
+        client = await cls._get_http_client()
+        if client is None:
+            return
+        try:
+            base_url = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+            await asyncio.wait_for(
+                client.options(base_url + "/v1/messages"),
+                timeout=5.0,
+            )
+        except Exception:
+            pass
+
+    @classmethod
     def get_provider(
         cls,
         provider_type: ProviderType | None = None,
@@ -92,6 +108,8 @@ class ProviderFactory:
         provider = cls._create_provider(provider_type, effective_config)
         provider.set_http_client(cls._ensure_sync_client())
         cls._instances[key] = provider
+        with contextlib.suppress(RuntimeError):
+            asyncio.create_task(cls._preconnect())
         return provider
 
     @classmethod

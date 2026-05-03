@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from server.services.compact import AUTOCOMPACT_BUFFER_TOKENS, _get_context_window_for_model
+from server.services.compact import AUTOCOMPACT_BUFFER_TOKENS, COMPACT_MAX_OUTPUT_TOKENS, _get_context_window_for_model
 from server.services.provider import Provider, StreamEvent
 from server.state.session import SessionStorage
 from server.tools.streaming import (
@@ -63,6 +63,14 @@ def get_auto_compact_threshold(context_window: int) -> int:
 AUTO_COMPACT_TOKEN_THRESHOLD = get_auto_compact_threshold(200_000)
 
 
+def get_current_turn_token_budget(model: str, state) -> int:
+    from server.services.compact import _get_context_window_for_model
+    context_window = _get_context_window_for_model(model)
+    used = state.total_usage.get("input_tokens", 0) if state else 0
+    available = context_window - used
+    return max(available, COMPACT_MAX_OUTPUT_TOKENS)
+
+
 class DynamicAbortController:
     def __init__(self, event: asyncio.Event, reason: str | None = None):
         self._event = event
@@ -112,6 +120,8 @@ class QueryState:
             "cache_read_input_tokens": 0,
         }
     )
+    last_turn_output_tokens: int = 0
+    last_turn_delta: int = 0
     _compact_boundary_index: int = 0
     _has_attempted_collapse_drain: bool = False
     _has_attempted_reactive_compact: bool = False
@@ -590,14 +600,26 @@ class QueryEngine:
     def _check_token_budget_on_state(self) -> bool:
         return self._check_token_budget(self.state.total_usage)
 
-    def _check_token_budget(self, usage: dict[str, Any]) -> bool:
-        if usage.get("input_tokens", 0) >= 200_000 * TOKEN_BUDGET_RATIO:
-            if usage.get("output_tokens", 0) < DIMINISHING_RETURNS_DELTA_THRESHOLD:
-                self.state.consecutive_low_output_count += 1
+    def _check_token_budget(self, usage: dict) -> bool:
+        model = getattr(self.config.provider, "config", None)
+        model_name = getattr(model, "model", "claude-sonnet-4-20250514") if model else "claude-sonnet-4-20250514"
+        budget = get_current_turn_token_budget(model_name, self.state)
+
+        output_tokens = usage.get("output_tokens", 0)
+        threshold = int(budget * TOKEN_BUDGET_RATIO)
+
+        if output_tokens >= threshold:
+            delta = output_tokens - self.state.last_turn_output_tokens
+            if delta < DIMINISHING_RETURNS_DELTA_THRESHOLD:
+                if self.state.last_turn_delta < DIMINISHING_RETURNS_DELTA_THRESHOLD:
+                    return True
+                self.state.last_turn_delta = delta
             else:
-                self.state.consecutive_low_output_count = 0
-            if self.state.consecutive_low_output_count >= DIMINISHING_RETURNS_CONSECUTIVE:
-                return True
+                self.state.last_turn_delta = delta
+        else:
+            self.state.last_turn_delta = 0
+
+        self.state.last_turn_output_tokens = output_tokens
         return False
 
     def interrupt(self) -> None:

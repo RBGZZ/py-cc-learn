@@ -41,10 +41,17 @@ class ProviderConfig:
     temperature: float = 1.0
     max_retries: int = 3
     fallback_model: str | None = None
+    betas: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         if self.max_retries < 0:
             self.max_retries = 3
+
+
+@dataclass
+class ExtendedThinkingConfig:
+    type: str = "enabled"
+    budget_tokens: int = 4000
 
 
 class Provider(ABC):
@@ -63,6 +70,7 @@ class Provider(ABC):
         system_prompt: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         signal: Any = None,
+        thinking_config: ExtendedThinkingConfig | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         yield StreamEvent(type="error", data={"message": "Not implemented"})
 

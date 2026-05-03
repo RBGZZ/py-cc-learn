@@ -16,6 +16,7 @@ from server.engine.query_engine import (
     QueryExitReason,
     QueryState,
     _make_interruption_message,
+    get_current_turn_token_budget,
 )
 from server.services.provider import StreamEvent
 
@@ -184,12 +185,26 @@ class TestTokenBudget:
 
     def test_token_budget_diminishing_returns(self):
         engine = QueryEngine(QueryEngineConfig())
-        engine.state.consecutive_low_output_count = DIMINISHING_RETURNS_CONSECUTIVE
+        # First round: output_tokens exceeds budget threshold, delta is high
+        budget = get_current_turn_token_budget("claude-sonnet-4-20250514", engine.state)
+        threshold = int(budget * TOKEN_BUDGET_RATIO)
         result = engine._check_token_budget({
-            "input_tokens": int(200_000 * TOKEN_BUDGET_RATIO) + 1,
-            "output_tokens": DIMINISHING_RETURNS_DELTA_THRESHOLD - 1,
+            "input_tokens": 10000,
+            "output_tokens": threshold + 100,
         })
-        assert result is True
+        assert result is False  # delta is high, not yet diminishing
+        # Second round: delta < 500, sets last_turn_delta
+        result2 = engine._check_token_budget({
+            "input_tokens": 10000,
+            "output_tokens": threshold + 100 + DIMINISHING_RETURNS_DELTA_THRESHOLD - 1,
+        })
+        assert result2 is False  # first low-delta round
+        # Third round: delta < 500 again, should trigger diminishing returns
+        result3 = engine._check_token_budget({
+            "input_tokens": 10000,
+            "output_tokens": threshold + 100 + (DIMINISHING_RETURNS_DELTA_THRESHOLD - 1) * 2,
+        })
+        assert result3 is True  # two consecutive low-delta rounds
 
 
 class TestExitReasons:

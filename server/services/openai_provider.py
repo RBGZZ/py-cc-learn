@@ -40,6 +40,7 @@ class OpenAIProvider(Provider):
         system_prompt: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         signal: Any = None,
+        thinking_config=None,
     ) -> AsyncGenerator[StreamEvent, None]:
         api_messages = self._convert_messages(messages, system_prompt)
 

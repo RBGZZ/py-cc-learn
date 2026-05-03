@@ -1,4 +1,4 @@
-# py-cc-learn &nbsp;`v0.3.4`
+# py-cc-learn &nbsp;`v0.3.5`
 
 > **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 295 tests
 
@@ -10,7 +10,8 @@
 
 | 版本 | 状态 | 说明 |
 |------|------|------|
-| `v0.3.4` | ✅ 最新 | 性能测试缺口补齐：6 项新基准 (多轮/并发/Compact/故障恢复/大上下文/SSE) |
+| `v0.3.5` | ✅ 最新 | 性能全面完善：Token Budget重写 / Prompt Caching / Extended Thinking / P1修复 |
+| `v0.3.4` | ✅ 已发布 | 性能测试缺口补齐 + 深度性能审计（43 gaps, 14 P0 已修复） |
 | `v0.3.3` | ✅ 已发布 | 性能基线对齐：HTTP客户端复用 / tiktoken统一 / slowapi限流 |
 | `v0.3.2` | ✅ 已发布 | 测试迭代2 (+21 tests, 274→295) + compact model |
 | `v0.3.1` | ✅ 已发布 | Qwen 适配 + 多 Provider 测试 + E2E 通过 |
@@ -34,7 +35,9 @@
 - **错误恢复管线** — max_output_tokens 升级+多次恢复 / 模型 fallback 自动切换 / missing tool_result 合成
 - **权限管道** — 7 种权限模式 + 4 阶段决策管道 + 11 种决策原因
 - **Hook 系统** — 27 种事件类型 + Post-sampling / Stop hooks 可注册 API
-- **上下文压缩** — Auto-Compact (180K token 阈值) + compact_boundary_index
+- **上下文压缩** — Auto-Compact (180K token 阈值) + Reactive Compact + Context Collapse + compact_boundary_index
+- **Prompt Caching** — Anthropic prompt-caching-2024-07-31 beta，系统提示词 + 消息前缀缓存
+- **Extended Thinking** — Anthropic thinking.budget_tokens 支持，流式 thinking 事件解析
 - **CLI 入口** — `python -m server.cli` 兼容 `--model` / `--resume` / `--cwd`
 - **结构化日志** — structlog + RotatingFileHandler + request_id 全链路追踪
 - **优雅关闭** — SIGTERM → 等待请求 → 清理子进程 → flush session → 退出
@@ -142,9 +145,9 @@ py-cc-learn/
 │   ├── nginx.conf             # 反向代理
 │   ├── docker-compose.yml     # 容器编排
 │   └── README.md              # 部署指南
-├── tests/                     # 238 单元/集成/E2E 测试
-├── tools/                     # 性能基准 + E2E + 多 Provider 测试
-├── audit/                     # TS 源码对比审计报告 (44/44 resolved)
+├── tests/                     # 295 单元/集成/E2E 测试
+├── tools/                     # 10 个性能基准 + E2E + 多 Provider 测试
+├── audit/                     # TS 源码对比审计 (44/44 + 性能审计 43 gaps)
 ├── .trae/specs/python-rewrite/ # 技术规格文档
 └── .github/workflows/         # CI 跨平台矩阵
 ```
@@ -174,8 +177,10 @@ py-cc-learn/
 | Phase 16 | 测试迭代 (+36 tests, 238 → 274) | ✅ |
 | Phase 17 | 性能基线对齐 (HTTP复用/tiktoken/限流/基准) | ✅ |
 | Phase 18 | 性能测试缺口补齐 (6 项新基准) | ✅ |
+| Phase 19 | 深度性能审计 (6 模块, 43 gaps, 14 P0 修复) | ✅ |
+| Phase 20 | 性能全面完善 (TokenBudget/PromptCaching/ExtendedThinking/P1修复) | ✅ |
 
-**54/54 Task 完成 · 311/311 Checklist 通过 · 295 tests passed · v0.3.4**
+**79/79 Task 完成 · 352/352 Checklist 通过 · 295 tests passed · v0.3.5**
 
 ---
 

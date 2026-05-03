@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -29,6 +28,7 @@ class QwenProvider(OpenAIProvider):
         system_prompt: str | None = None,
         tools: list | None = None,
         signal=None,
+        thinking_config=None,
     ) -> AsyncGenerator[StreamEvent, None]:
         api_messages = self._convert_messages(messages, system_prompt)
         body = {

@@ -471,6 +471,8 @@ class StreamingToolExecutor:
                             self._has_errored = True
                             self._errored_tool_description = self._get_tool_description(tool)
                             self._sibling_abort_controller.abort("sibling_error")
+                        if tool.block.name == "bash" and hasattr(self, "_sibling_abort"):
+                            self._sibling_abort.set()
 
                     if update_message is not None:
                         if getattr(update_message, "type", None) == "progress":
@@ -536,6 +538,7 @@ class StreamingToolExecutor:
                 yield {
                     "message": progress_message,
                     "new_context": self._tool_use_context,
+                    "is_progress": True,
                 }
 
             if tool.status == STATUS_YIELDED:

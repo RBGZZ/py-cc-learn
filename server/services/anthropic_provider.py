@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -13,6 +15,7 @@ from server.services.errors import (
     classify_api_error,
 )
 from server.services.provider import (
+    ExtendedThinkingConfig,
     Provider,
     ProviderConfig,
     ProviderType,
@@ -113,13 +116,36 @@ class AnthropicProvider(Provider):
         system_prompt: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         signal: Any = None,
+        thinking_config: ExtendedThinkingConfig | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         normalized_messages = self._normalize_messages_for_api(messages)
         api_messages = self._convert_messages(normalized_messages)
 
+        if os.environ.get("CLAUDE_CODE_PROMPT_CACHING_ENABLED", "").lower() in ("1", "true"):
+            for i in range(len(api_messages) - 2):
+                msg = api_messages[i]
+                content = msg.get("content", [])
+                if isinstance(content, list) and content:
+                    last_block = content[-1]
+                    if isinstance(last_block, dict) and "cache_control" not in last_block:
+                        last_block = {**last_block, "cache_control": {"type": "ephemeral"}}
+                        content[-1] = last_block
+
         system_blocks: list[dict[str, Any]] = []
         if system_prompt:
-            system_blocks = [{"type": "text", "text": system_prompt}]
+            caching = os.environ.get(
+                "CLAUDE_CODE_PROMPT_CACHING_ENABLED", ""
+            ).lower() in ("1", "true")
+            if caching:
+                system_blocks = [
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+            else:
+                system_blocks = [{"type": "text", "text": system_prompt}]
 
         body: dict[str, Any] = {
             "model": self.config.model,
@@ -133,11 +159,27 @@ class AnthropicProvider(Provider):
         if tools:
             body["tools"] = tools
 
+        if os.environ.get("EXTENDED_THINKING_ENABLED", "").lower() not in ("1", "true"):
+            thinking_config = None
+        if thinking_config and thinking_config.type == "enabled":
+            body["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": thinking_config.budget_tokens,
+            }
+
+        betas = []
+        if os.environ.get("CLAUDE_CODE_PROMPT_CACHING_ENABLED", "").lower() in ("1", "true"):
+            betas.append("prompt-caching-2024-07-31")
+        if self.config.betas:
+            betas.extend(self.config.betas)
+
         headers = {
             "x-api-key": self.config.api_key,
             "anthropic-version": self._ANTHROPIC_VERSION,
             "content-type": "application/json",
         }
+        if betas:
+            headers["anthropic-beta"] = ",".join(betas)
 
         retry_config = RetryConfig(
             max_retries=self.config.max_retries,
@@ -203,7 +245,16 @@ class AnthropicProvider(Provider):
         is_first_chunk = True
 
         buffer = ""
-        async for chunk in response.aiter_bytes():
+        _timeout = int(os.environ.get("SSE_IDLE_TIMEOUT_SECONDS", "120"))
+        it = response.aiter_bytes().__aiter__()
+        while True:
+            try:
+                chunk = await asyncio.wait_for(it.__anext__(), timeout=_timeout)
+            except StopAsyncIteration:
+                break
+            except TimeoutError:
+                yield StreamEvent(type="error", data={"message": "idle_timeout"})
+                return
             buffer += chunk.decode("utf-8", errors="replace")
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)
@@ -265,6 +316,12 @@ class AnthropicProvider(Provider):
                         data={"event": parsed, "event_type": "content_block_start"},
                     )
 
+                    if block_type == "thinking":
+                        yield StreamEvent(
+                            type="thinking_delta",
+                            data={"thinking": "", "signature": ""},
+                        )
+
                 elif event_type == "content_block_delta":
                     delta = parsed.get("delta", {})
                     index = parsed.get("index", 0)
@@ -286,9 +343,15 @@ class AnthropicProvider(Provider):
                                 block["thinking"] = block.get("thinking", "") + delta.get(
                                     "thinking", ""
                                 )
-                        elif delta_type == "signature_delta":
-                            if block.get("type") == "thinking":
-                                block["signature"] = delta.get("signature", "")
+                                yield StreamEvent(
+                                    type="thinking_delta",
+                                    data={"thinking": delta.get("thinking", "")},
+                                )
+                        elif (
+                            delta_type == "signature_delta"
+                            and block.get("type") == "thinking"
+                        ):
+                            block["signature"] = delta.get("signature", "")
 
                     yield StreamEvent(
                         type="stream_event",
@@ -316,6 +379,15 @@ class AnthropicProvider(Provider):
                             type="assistant",
                             data=assistant_message,
                         )
+
+                        if block.get("type") == "thinking":
+                            yield StreamEvent(
+                                type="thinking_delta",
+                                data={
+                                    "thinking": block.get("thinking", ""),
+                                    "signature": block.get("signature", ""),
+                                },
+                            )
 
                 elif event_type == "message_delta":
                     delta = parsed.get("delta", {})

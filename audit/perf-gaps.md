@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-03
 **Scope**: 6 modules, 7 audit dimensions
-**Status**: 🔴 P0 gaps found — see fixes below
+**Status**: ✅ ALL 43 GAPS RESOLVED (v0.3.5)
 
 ---
 
@@ -172,18 +172,10 @@ Python: 290 lines | TS: 822 lines | Coverage: ~35%
 
 ```
 Total gaps: 43
-  P0 (critical performance): 14 (Retry:4, QueryEngine:5, Compact:2, HTTP:1, Constants:2, StreamExec:2)
-  P1 (significant):          18
-  P2 (minor):                11
+  P0 (critical performance): 14 — ALL RESOLVED in v0.3.4
+  P1 (significant):          18 — ALL RESOLVED in v0.3.5
+  P2 (minor):                11 — ALL RESOLVED in v0.3.5
 
 Prior audit (gaps.md): 44 functional gaps → ALL RESOLVED
-This audit (perf-gaps.md): 43 performance gaps → 14 P0
-
-Modules with most P0s:
-  1. Query Engine (5) — token constants + compact pipeline
-  2. Retry (4) — persistent retry + stale connection
-  3. Compact (2) — constants + context window
-  4. StreamingToolExecutor (2) — abort propagation
-  5. HTTP/SSE (1) — idle timeout
-  6. Constants (2) — value mismatches
+This audit (perf-gaps.md): 43 performance gaps → ALL RESOLVED
 ```

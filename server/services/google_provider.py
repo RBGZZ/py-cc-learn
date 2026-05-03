@@ -40,6 +40,7 @@ class GoogleProvider(Provider):
         system_prompt: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         signal: Any = None,
+        thinking_config=None,
     ) -> AsyncGenerator[StreamEvent, None]:
         gemini_contents = self._convert_messages(messages)
 
