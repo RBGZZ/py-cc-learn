@@ -15,6 +15,12 @@ const emit = defineEmits<{
 const inputText = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 
+// History navigation
+const MAX_HISTORY = 50
+const history = ref<string[]>([])
+const historyIndex = ref(-1)
+let draftBeforeBrowse = ''
+
 onMounted(() => {
   nextTick(() => {
     textareaRef.value?.focus()
@@ -24,14 +30,70 @@ onMounted(() => {
 function handleSubmit(): void {
   const text = inputText.value.trim()
   if (!text || props.disabled) return
+
+  // Push to history (deduplicate consecutive same entries)
+  const lastEntry = history.value[history.value.length - 1]
+  if (lastEntry !== text) {
+    history.value.push(text)
+    if (history.value.length > MAX_HISTORY) {
+      history.value.shift()
+    }
+  }
+
   emit('submit', text)
   inputText.value = ''
+  historyIndex.value = -1
 }
 
 function handleKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     handleSubmit()
+    return
+  }
+
+  if (e.key === 'ArrowUp') {
+    const el = textareaRef.value
+    if (!el) return
+    // Only navigate history when cursor is at the beginning of input
+    if (el.selectionStart !== 0) return
+
+    e.preventDefault()
+    if (history.value.length === 0) return
+
+    if (historyIndex.value === -1) {
+      // Start browsing: save current draft
+      draftBeforeBrowse = inputText.value
+      historyIndex.value = history.value.length - 1
+    } else if (historyIndex.value > 0) {
+      historyIndex.value--
+    }
+    inputText.value = history.value[historyIndex.value]
+    return
+  }
+
+  if (e.key === 'ArrowDown') {
+    if (historyIndex.value === -1) return
+    e.preventDefault()
+
+    if (historyIndex.value < history.value.length - 1) {
+      historyIndex.value++
+      inputText.value = history.value[historyIndex.value]
+    } else {
+      // Past the end: restore draft
+      historyIndex.value = -1
+      inputText.value = draftBeforeBrowse
+    }
+    return
+  }
+
+  if (e.key === 'Escape') {
+    if (historyIndex.value !== -1) {
+      e.preventDefault()
+      historyIndex.value = -1
+      inputText.value = draftBeforeBrowse
+    }
+    return
   }
 }
 

@@ -18,17 +18,57 @@ const isScrolledUp = ref(false)
 const visibleCount = ref(MESSAGES_PER_PAGE)
 const isAutoScroll = ref(true)
 
-const hasMessages = computed(() => store.messages.length > 0)
-const totalMessages = computed(() => store.messages.length)
+// Show/hide meta/system messages
+function readShowMeta(): boolean {
+  try {
+    return localStorage.getItem('showMeta') === 'true'
+  } catch {
+    return false
+  }
+}
+
+function writeShowMeta(val: boolean): void {
+  try {
+    localStorage.setItem('showMeta', String(val))
+  } catch { /* ignore */
+  }
+}
+
+const showMeta = ref(readShowMeta())
+
+watch(showMeta, (val) => {
+  writeShowMeta(val)
+})
+
+// Normalized messages: filter meta messages (unless showMeta is true), sort by timestamp/order
+const normalizedMessages = computed(() => {
+  const filtered = store.messages.filter((msg: any) => {
+    if (!msg.isMeta) return true
+    return showMeta.value
+  })
+  // Sort by timestamp if available, otherwise preserve original order
+  return filtered.slice().sort((a: any, b: any) => {
+    const ta = a.timestamp
+    const tb = b.timestamp
+    if (ta != null && tb != null) {
+      return ta - tb
+    }
+    // If no timestamp available, preserve index order
+    return 0
+  })
+})
+
+const hasMessages = computed(() => normalizedMessages.value.length > 0)
+const totalMessages = computed(() => normalizedMessages.value.length)
 
 // Virtual scrolling: only show last N messages
 const visibleMessages = computed(() => {
-  const all = store.messages
+  const all = normalizedMessages.value
   if (all.length <= visibleCount.value) return all
   return all.slice(all.length - visibleCount.value)
 })
 
-const hasMoreMessages = computed(() => visibleMessages.value.length < store.messages.length)
+const hasMoreMessages = computed(() => visibleMessages.value.length < normalizedMessages.value.length)
 
 function loadMore(): void {
   const prevCount = visibleCount.value
@@ -129,6 +169,13 @@ function handlePermissionResponse(id: string, behavior: PermissionBehavior): voi
     <div v-if="hasMoreMessages" class="load-more-wrapper">
       <button class="load-more-btn" @click="loadMore">
         Load older messages ({{ totalMessages - visibleMessages.length }} hidden)
+      </button>
+    </div>
+
+    <!-- Meta messages toggle -->
+    <div v-if="hasMessages" class="meta-toggle-wrapper">
+      <button class="meta-toggle-btn" @click="showMeta = !showMeta">
+        {{ showMeta ? 'Hide system messages' : 'Show system messages' }}
       </button>
     </div>
 
@@ -239,6 +286,29 @@ function handlePermissionResponse(id: string, behavior: PermissionBehavior): voi
 
 .load-more-btn:hover {
   background-color: var(--bg-tertiary);
+}
+
+/* ---- Meta toggle ---- */
+.meta-toggle-wrapper {
+  text-align: center;
+  padding: 4px 0 8px;
+}
+
+.meta-toggle-btn {
+  padding: 4px 12px;
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.meta-toggle-btn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 
 /* ---- Processing indicator ---- */

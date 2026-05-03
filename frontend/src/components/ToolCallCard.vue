@@ -10,12 +10,15 @@ export interface ToolCallData {
   error?: string
 }
 
+const TRUNCATE_THRESHOLD = 500
+
 const props = defineProps<{
   toolCall: ToolCallData
 }>()
 
 const inputExpanded = ref(false)
 const resultExpanded = ref(false)
+const bashFullOutput = ref(false)
 
 function toggleInput(): void {
   inputExpanded.value = !inputExpanded.value
@@ -23,6 +26,14 @@ function toggleInput(): void {
 
 function toggleResult(): void {
   resultExpanded.value = !resultExpanded.value
+  // Reset bash expand when collapsing result section
+  if (!resultExpanded.value) {
+    bashFullOutput.value = false
+  }
+}
+
+function toggleBashOutput(): void {
+  bashFullOutput.value = !bashFullOutput.value
 }
 
 function formatJson(data: any): string {
@@ -50,6 +61,25 @@ const toolIcon = computed(() => {
   if (name.includes('delete') || name.includes('rm')) return '&#x1F5D1;'
   if (name.includes('http') || name.includes('fetch') || name.includes('api')) return '&#x1F310;'
   return '&#x1F527;'
+})
+
+const isBashTool = computed(() => {
+  const name = props.toolCall.name.toLowerCase()
+  return name.includes('bash') || name.includes('shell')
+})
+
+const resultStr = computed(() => {
+  if (props.toolCall.result === undefined) return ''
+  return formatJson(props.toolCall.result)
+})
+
+const isTruncatable = computed(() => {
+  return isBashTool.value && resultStr.value.length > TRUNCATE_THRESHOLD
+})
+
+const truncatedResult = computed(() => {
+  if (!isTruncatable.value) return resultStr.value
+  return resultStr.value.slice(0, TRUNCATE_THRESHOLD) + '...'
 })
 </script>
 
@@ -88,7 +118,17 @@ const toolIcon = computed(() => {
         <span class="tool-toggle-arrow" :class="{ expanded: resultExpanded }">&#x25B6;</span>
         <span>Result</span>
       </button>
-      <pre v-if="resultExpanded" class="tool-json tool-result-json">{{ formatJson(toolCall.result) }}</pre>
+      <template v-if="resultExpanded">
+        <!-- Truncatable bash output -->
+        <template v-if="isTruncatable">
+          <pre class="tool-json tool-result-json">{{ bashFullOutput ? resultStr : truncatedResult }}</pre>
+          <button class="bash-toggle-btn" @click="toggleBashOutput">
+            {{ bashFullOutput ? 'Collapse' : `Show full output (${resultStr.length} chars)` }}
+          </button>
+        </template>
+        <!-- Normal result -->
+        <pre v-else class="tool-json tool-result-json">{{ formatJson(toolCall.result) }}</pre>
+      </template>
     </div>
 
     <!-- Error section -->
@@ -223,6 +263,25 @@ const toolIcon = computed(() => {
 
 .tool-result-json {
   color: var(--success);
+}
+
+/* ---- Bash output toggle ---- */
+.bash-toggle-btn {
+  display: block;
+  width: 100%;
+  padding: 4px 12px 8px 24px;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: color 0.15s;
+}
+
+.bash-toggle-btn:hover {
+  color: #60a5fa;
 }
 
 /* ---- Error ---- */

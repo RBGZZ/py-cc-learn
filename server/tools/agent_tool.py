@@ -5,7 +5,7 @@ import logging
 import os
 import time
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
@@ -169,7 +169,7 @@ class AgentTool(Tool[AgentInput, AgentOutput, Any]):
 
     async def call(
         self, args: AgentInput, context: Any, can_use_tool: Any = None,
-        parent_message: Any = None, on_progress: Any = None,
+        parent_message: Any = None, on_progress: Callable[[dict[str, Any]], Any] | None = None,
     ) -> ToolCallResult:
         task_id = generate_task_id(TaskType.LOCAL_AGENT)
         agent_id = str(uuid.uuid4())[:8]
@@ -196,7 +196,7 @@ class AgentTool(Tool[AgentInput, AgentOutput, Any]):
         task_state.status = TaskStatus.RUNNING
 
         try:
-            result_dict = await self._run_subagent(args, subagent_ctx)
+            result_dict = await self._run_subagent(args, subagent_ctx, on_progress=on_progress)
             task_state.status = TaskStatus.COMPLETED
             task_state.end_time = int(time.time() * 1000)
 
@@ -228,13 +228,17 @@ class AgentTool(Tool[AgentInput, AgentOutput, Any]):
                 elapsed_ms=subagent_ctx.elapsed_ms,
             ))
 
-    async def _run_subagent(self, args: AgentInput, ctx: SubagentContext) -> dict[str, Any]:
+    async def _run_subagent(
+        self, args: AgentInput, ctx: SubagentContext,
+        on_progress: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> dict[str, Any]:
         parent_tools = getattr(self, "_parent_tools", None)
         if not parent_tools:
             return {
                 "result_text": f"I would run the subagent of type '{args.subagent_type}' for task: '{args.prompt}'. Subagent execution requires the full query engine infrastructure.",
                 "tool_use_count": 0, "total_tokens": 0, "status": "completed",
                 "content": [{"type": "text", "text": AGENT_TYPE_DESCRIPTIONS.get(args.subagent_type, "")}],
+                "timeout_info": _timeout_info(False),
             }
 
         from server.engine.query_engine import QueryEngine, QueryEngineConfig
@@ -245,6 +249,7 @@ class AgentTool(Tool[AgentInput, AgentOutput, Any]):
                 "result_text": f"No tools available for agent type '{args.subagent_type}'",
                 "tool_use_count": 0, "total_tokens": 0, "status": "completed",
                 "content": [{"type": "text", "text": f"No tools available"}],
+                "timeout_info": _timeout_info(False),
             }
 
         prompt_parts = [
@@ -265,6 +270,7 @@ class AgentTool(Tool[AgentInput, AgentOutput, Any]):
         tool_use_count = 0
         total_tokens = 0
         subagent_status = "completed"
+        timed_out = False
 
         try:
             async with asyncio.timeout(SUBAGENT_TIMEOUT_MS / 1000):
@@ -286,7 +292,10 @@ class AgentTool(Tool[AgentInput, AgentOutput, Any]):
                         usage = event.get("usage", {})
                         total_tokens = usage.get("total_tokens", 0) if isinstance(usage, dict) else 0
                         break
+                    if on_progress is not None:
+                        on_progress({"type": "progress", "status": subagent_status, "tool_use_count": tool_use_count, "elapsed_ms": ctx.elapsed_ms})
         except TimeoutError:
+            timed_out = True
             result_parts.append(f"[timeout: subagent exceeded {SUBAGENT_TIMEOUT_MS / 1000:.0f}s limit]")
             subagent_status = "timeout"
             _logger.warning("Subagent timeout after %dms: %d tool uses", SUBAGENT_TIMEOUT_MS, tool_use_count)
@@ -296,6 +305,7 @@ class AgentTool(Tool[AgentInput, AgentOutput, Any]):
             "result_text": result_text, "tool_use_count": tool_use_count,
             "total_tokens": total_tokens, "status": subagent_status,
             "content": [{"type": "text", "text": result_text}] if result_text else [],
+            "timeout_info": _timeout_info(timed_out),
         }
 
     async def description(self, input: AgentInput, options: dict[str, Any]) -> str:
@@ -321,10 +331,20 @@ class AgentTool(Tool[AgentInput, AgentOutput, Any]):
                 ),
             })
             return {"type": "tool_result", "tool_use_id": tool_use_id, "content": output_blocks}
-        return {
-            "type": "tool_result", "tool_use_id": tool_use_id,
-            "content": [{"type": "text", "text": content.result or f"Agent status: {content.status}"}],
-        }
+        if content.status == "timeout":
+            duration_s = content.elapsed_ms / 1000.0
+            detail = f"Subagent timed out after {duration_s:.1f}s ({content.tool_use_count} tool uses completed)"
+        elif content.status == "killed":
+            detail = "Agent was cancelled by user"
+        elif content.status == "failed":
+            detail = f"Agent failed: {content.result}"
+        else:
+            detail = content.result or f"Agent status: {content.status}"
+        return {"type": "tool_result", "tool_use_id": tool_use_id, "content": [{"type": "text", "text": detail}]}
 
     def render_tool_use_message(self, input: dict[str, Any], options: dict[str, Any]) -> Any:
         return None
+
+
+def _timeout_info(timed_out: bool) -> dict[str, Any]:
+    return {"timed_out": timed_out, "timeout_ms": SUBAGENT_TIMEOUT_MS}

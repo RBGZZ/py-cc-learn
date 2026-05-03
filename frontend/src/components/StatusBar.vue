@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useChatStore } from '../stores/chat'
+import { usePermissionStore } from '../stores/permission'
 
 const store = useChatStore()
+const permStore = usePermissionStore()
 
 const modelDisplay = computed(() => store.currentModel || 'Not connected')
 const permissionDisplay = computed(() => {
@@ -20,6 +22,7 @@ const tokenDisplay = computed(
   () => `${(store.contextTokens / 1000).toFixed(1)}k / ${(store.contextLimit / 1000).toFixed(0)}k tokens`
 )
 const statusClass = computed(() => (store.isProcessing ? 'status-processing' : 'status-idle'))
+const pendingDisplay = computed(() => `${permStore.pendingRequests.length} requests`)
 </script>
 
 <template>
@@ -39,6 +42,10 @@ const statusClass = computed(() => (store.isProcessing ? 'status-processing' : '
     <div class="status-item">
       <span class="status-label">Context</span>
       <span class="status-value">{{ tokenDisplay }}</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">Pending</span>
+      <span class="status-value">{{ pendingDisplay }}</span>
     </div>
     <div class="status-item status-indicator">
       <span class="status-dot" :class="statusClass"></span>
