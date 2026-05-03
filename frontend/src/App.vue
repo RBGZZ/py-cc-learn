@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useChatStore } from './stores/chat'
+import { useConfigStore } from './stores/config'
 import { useSSE } from './utils/sse'
 import type { UploadedImage } from './utils/clipboard'
 import ChatMessages from './components/ChatMessages.vue'
 import ChatInput from './components/ChatInput.vue'
 import StatusBar from './components/StatusBar.vue'
+import SideNav from './components/SideNav.vue'
 
 const store = useChatStore()
+const config = useConfigStore()
 const { connect, disconnect } = useSSE()
 
 onMounted(() => {
@@ -18,7 +21,12 @@ function handleSubmit(text: string) {
   if (!text.trim() || store.isProcessing) return
   store.addMessage({ role: 'user', content: text })
   store.setProcessing(true)
-  connect(text)
+  const apiKey = config.getApiKey(config.activeProvider)
+  connect(text, {
+    model: config.activeModel,
+    provider: config.activeProvider,
+    apiKey: apiKey || undefined,
+  })
 }
 
 function handleImagePaste(image: UploadedImage) {
@@ -35,23 +43,26 @@ function handleStop() {
 </script>
 
 <template>
-  <div class="app-container">
-    <header class="app-header">
-      <h1>py-cc-learn</h1>
-      <span class="app-subtitle">AI Coding Assistant</span>
-    </header>
-    <StatusBar />
-    <main class="app-main">
-      <ChatMessages />
-    </main>
-    <footer class="app-footer">
-      <ChatInput
-        :disabled="store.isProcessing"
-        @submit="handleSubmit"
-        @stop="handleStop"
-        @image-paste="handleImagePaste"
-      />
-    </footer>
+  <div class="app-shell">
+    <SideNav />
+    <div class="app-container">
+      <header class="app-header">
+        <h1>py-cc-learn</h1>
+        <span class="app-subtitle">{{ config.activeProvider }} / {{ config.activeModel }}</span>
+      </header>
+      <StatusBar />
+      <main class="app-main">
+        <ChatMessages />
+      </main>
+      <footer class="app-footer">
+        <ChatInput
+          :disabled="store.isProcessing"
+          @submit="handleSubmit"
+          @stop="handleStop"
+          @image-paste="handleImagePaste"
+        />
+      </footer>
+    </div>
   </div>
 </template>
 
@@ -91,12 +102,17 @@ html, body {
   height: 100%;
 }
 
+.app-shell {
+  display: flex;
+  height: 100%;
+}
+
 .app-container {
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-width: 960px;
-  margin: 0 auto;
+  flex: 1;
+  min-width: 0;
 }
 
 .app-header {

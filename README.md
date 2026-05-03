@@ -10,7 +10,7 @@
 
 | 版本 | 状态 | 说明 |
 |------|------|------|
-| `v0.7.0` | ✅ 最新 | 测试补齐：中断恢复/max_tokens/100并发/前端组件/Docker部署 |
+| `v0.7.0` | ✅ 最新 | Docker本地部署验证 / 测试补齐 / 大模型兼容 / 安全加固 |
 | `v0.6.0` | ✅ 已发布 | 生产验证：Docker部署 / 多轮工具链路 / Caching对比 / 负载压测 |
 | `v0.5.0` | ✅ 已发布 | 安全加固：Shell注入修复/tree-sitter AST/权限检查/Docker加固/KDF/CSRF |
 | `v0.4.0` | ✅ 已发布 | 需求评审系统 + MCP 完整集成 (SSE/HTTP/OAuth/连接管理/权限) |
@@ -24,7 +24,7 @@
 | `v0.2.0` | ✅ 已发布 | compact pipeline, AgentTool, permission UI |
 | 目标 `v1.0` | ⬜ 计划中 | 多模态 + 需求评审
 
-**当前仍在积极开发中，不保证 API 稳定性。**
+**317 tests passed · Docker verified · Security 92/100**
 
 ---
 
@@ -55,44 +55,35 @@
 ### 前提条件
 
 - Python 3.12+
-- Node.js 20+
-- Git
-- Docker Desktop（可选，用于沙箱隔离）
+- Node.js 18+ (前端)
+- Docker Desktop (可选，沙箱/Bash 工具隔离)
+
+### 1. 配置 API Key
+```bash
+cp .env.example .env
+# 编辑 .env 填入至少一个 API Key
+```
 
 ### 安装
 
 ```bash
-# 1. 克隆仓库
 git clone https://github.com/RBGZZ/py-cc-learn.git
 cd py-cc-learn
-
-# 2. 安装 Python 依赖
 uv sync
-
-# 3. 配置 API Key
-cp .env.example .env
-# 编辑 .env，填入以下任一 Key：
-#   DEEPSEEK_API_KEY=sk-xxx
-#   ANTHROPIC_API_KEY=sk-ant-xxx
-#   OPENAI_API_KEY=sk-xxx
-#   GOOGLE_API_KEY=xxx
-#   QWEN_API_KEY=sk-xxx
-
-# 4. 安装前端依赖并构建
-cd frontend
-npm install
-npm run build
-cd ..
+cd frontend && npm install && npm run build && cd ..
 ```
 
-### 启动
+### 启动（任选一种）
 
 ```bash
-# 开发模式
+# 开发模式（直启动）
 uv run uvicorn server.main:app --reload --port 8000
 
 # CLI 模式
 uv run python -m server.cli --prompt "Hello" --model deepseek-v4-flash
+# Docker 部署
+docker build -f deploy/Dockerfile -t py-cc-learn:v0.7.0 .
+docker run -d --name py-cc -p 8000:8000 --env-file .env py-cc-learn:v0.7.0
 ```
 
 浏览器打开 `http://localhost:8000` 即可使用。

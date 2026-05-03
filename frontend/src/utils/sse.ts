@@ -212,13 +212,19 @@ function parseSSEFrames(buffer: string): {
   return { frames, remaining: buffer.slice(pos) }
 }
 
+export interface ChatOptions {
+  model?: string
+  provider?: string
+  apiKey?: string
+}
+
 let sseConnection: SSEConnection | null = null
 const messageHandlers = new Set<(event: SSEEvent) => void>()
 const errorHandlers = new Set<(error: Error) => void>()
 const reconnectHandlers = new Set<(attempt: number) => void>()
 
 export function useSSE() {
-  function connect(prompt: string): void {
+  function connect(prompt: string, opts?: ChatOptions): void {
     if (sseConnection) {
       sseConnection.disconnect()
     }
@@ -240,8 +246,12 @@ export function useSSE() {
       },
     })
 
-    const body = JSON.stringify({ prompt })
-    sseConnection.connect(body).catch((err) => {
+    const body: Record<string, string> = { prompt }
+    if (opts?.model) body.model = opts.model
+    if (opts?.provider) body.provider = opts.provider
+    if (opts?.apiKey) body.api_key = opts.apiKey
+
+    sseConnection.connect(JSON.stringify(body)).catch((err) => {
       errorHandlers.forEach((h) => h(err))
     })
   }

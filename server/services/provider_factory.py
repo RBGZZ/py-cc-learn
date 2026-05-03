@@ -93,6 +93,7 @@ class ProviderFactory:
         cls,
         provider_type: ProviderType | None = None,
         config: ProviderConfig | None = None,
+        api_key: str | None = None,
     ) -> Provider:
         settings = get_settings()
 
@@ -100,6 +101,8 @@ class ProviderFactory:
             provider_type = cls._auto_detect_provider(settings)
 
         effective_config = cls._build_config(provider_type, config, settings)
+        if api_key:
+            effective_config.api_key = api_key
         key = f"{provider_type.value}:{effective_config.model}"
 
         if key in cls._instances:

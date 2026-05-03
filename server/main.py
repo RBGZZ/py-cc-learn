@@ -41,6 +41,8 @@ _active_connection_lock = asyncio.Lock()
 class ChatRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=MAX_PROMPT_CHARS)
     model: str | None = None
+    provider: str | None = None
+    api_key: str | None = None
     permission_mode: str = "default"
     session_id: str | None = None
     resume: bool = False
@@ -397,6 +399,44 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/api/v1/models")
+async def list_models():
+    return {
+        "models": [
+            {
+                "provider": "deepseek",
+                "models": ["deepseek-v4-flash", "deepseek-chat", "deepseek-coder"],
+                "base_url": "https://api.deepseek.com",
+                "api_key_env": "DEEPSEEK_API_KEY",
+            },
+            {
+                "provider": "openai",
+                "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o3-mini"],
+                "base_url": "https://api.openai.com",
+                "api_key_env": "OPENAI_API_KEY",
+            },
+            {
+                "provider": "anthropic",
+                "models": ["claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-haiku-4-20250514"],
+                "base_url": "https://api.anthropic.com",
+                "api_key_env": "ANTHROPIC_API_KEY",
+            },
+            {
+                "provider": "qwen",
+                "models": ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-coder-plus"],
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode",
+                "api_key_env": "QWEN_API_KEY",
+            },
+            {
+                "provider": "google",
+                "models": ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-pro"],
+                "base_url": "https://generativelanguage.googleapis.com",
+                "api_key_env": "GOOGLE_API_KEY",
+            },
+        ]
+    }
+
+
 @app.get("/api/v1/status", response_model=StatusResponse)
 async def status():
     from server.state.global_state import GlobalState
@@ -453,7 +493,25 @@ async def chat(request: Request):
     try:
         from server.services.provider_factory import ProviderFactory
 
-        provider = ProviderFactory.get_provider()
+        provider_type = None
+        if chat_req.provider:
+            from server.services.provider import ProviderType
+            mapping = {
+                "deepseek": ProviderType.DEEPSEEK,
+                "openai": ProviderType.OPENAI,
+                "anthropic": ProviderType.ANTHROPIC,
+                "qwen": ProviderType.QWEN,
+                "google": ProviderType.GOOGLE,
+            }
+            provider_type = mapping.get(chat_req.provider.lower())
+
+        if provider_type and chat_req.api_key:
+            provider = ProviderFactory.get_provider(provider_type=provider_type, api_key=chat_req.api_key)
+        elif provider_type:
+            provider = ProviderFactory.get_provider(provider_type=provider_type)
+        else:
+            provider = ProviderFactory.get_provider()
+
         if chat_req.model and provider:
             provider.config.model = chat_req.model
     except Exception as exc:
