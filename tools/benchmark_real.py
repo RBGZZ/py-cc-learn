@@ -130,13 +130,21 @@ async def bench_real_provider(provider_type: ProviderType) -> None:
     ))
     start = time.perf_counter()
     text_parts = []
+    ttft = None
+    output_tokens = 0
     async for event in engine.submit_message("Say hello in exactly 3 words."):
         if event.get("type") == "text_delta":
+            if ttft is None:
+                ttft = time.perf_counter() - start
             text_parts.append(event.get("text", ""))
+        if event.get("type") == "assistant":
+            usage = event.get("message", {}).get("usage", {})
+            output_tokens = usage.get("output_tokens", 0)
     elapsed = time.perf_counter() - start
     response = "".join(text_parts)
     print(f"  Response: \"{response}\"")
-    print(f"  TTFT: ~0.5s, Total: {elapsed:.2f}s\n")
+    throughput = output_tokens / elapsed if output_tokens and elapsed > 0 else 0
+    print(f"  TTFT: {ttft:.3f}s, Total: {elapsed:.2f}s, Throughput: {throughput:.1f} tokens/s\n")
 
 
 async def main():

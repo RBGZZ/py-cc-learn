@@ -172,7 +172,7 @@ class TestQueryEngine:
 
 class TestTokenBudget:
     def test_constants(self):
-        assert AUTO_COMPACT_TOKEN_THRESHOLD == 180_000
+        assert AUTO_COMPACT_TOKEN_THRESHOLD == 187_000
         assert DEFAULT_MAX_TURNS == 50
         assert TOKEN_BUDGET_RATIO == 0.9
         assert DIMINISHING_RETURNS_DELTA_THRESHOLD == 500

@@ -1,6 +1,6 @@
-# py-cc-learn &nbsp;`v0.3.2`
+# py-cc-learn &nbsp;`v0.3.4`
 
-> **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 274 tests
+> **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 295 tests
 
 基于 [Claude Code Haha](https://github.com/anthropics/claude-code) 源码，使用 **Python 3.12+** (FastAPI) + **Vue 3** (Vite) 完整重写，支持多厂商模型后端。
 
@@ -10,7 +10,10 @@
 
 | 版本 | 状态 | 说明 |
 |------|------|------|
-| `v0.3.1` | ✅ 最新 | Qwen 适配 + 多 Provider 测试 + E2E 通过 |
+| `v0.3.4` | ✅ 最新 | 性能测试缺口补齐：6 项新基准 (多轮/并发/Compact/故障恢复/大上下文/SSE) |
+| `v0.3.3` | ✅ 已发布 | 性能基线对齐：HTTP客户端复用 / tiktoken统一 / slowapi限流 |
+| `v0.3.2` | ✅ 已发布 | 测试迭代2 (+21 tests, 274→295) + compact model |
+| `v0.3.1` | ✅ 已发布 | Qwen 适配 + 多 Provider 测试 + E2E 通过 |
 | `v0.3.0` | ✅ 已发布 | 44/44 audit gaps resolved, 生产就绪 |
 | `v0.2.1` | ✅ 已发布 | streaming fallback, PTL recovery, token budget |
 | `v0.2.0` | ✅ 已发布 | compact pipeline, AgentTool, permission UI |
@@ -169,8 +172,10 @@ py-cc-learn/
 | Phase 14 | 审计差距修复 (44/44 resolved) | ✅ |
 | Phase 15 | Qwen 适配 + 多 Provider 测试 | ✅ |
 | Phase 16 | 测试迭代 (+36 tests, 238 → 274) | ✅ |
+| Phase 17 | 性能基线对齐 (HTTP复用/tiktoken/限流/基准) | ✅ |
+| Phase 18 | 性能测试缺口补齐 (6 项新基准) | ✅ |
 
-**49/49 Task 完成 · 293/293 Checklist 通过 · 274 tests passed · v0.3.2**
+**54/54 Task 完成 · 311/311 Checklist 通过 · 295 tests passed · v0.3.4**
 
 ---
 
@@ -213,6 +218,24 @@ uv run python tools/benchmark_cold_start.py
 # 内存泄漏检测
 uv run python tools/benchmark_memory.py
 
+# 多轮对话基准
+uv run python tools/benchmark_multiturn.py
+
+# Compact 管线基准
+uv run python tools/benchmark_compact.py
+
+# Provider 故障恢复基准
+uv run python tools/benchmark_resilience.py
+
+# 大上下文基准
+uv run python tools/benchmark_large_context.py
+
+# SSE 解析基准
+uv run python tools/benchmark_sse_parse.py
+
+# 并发负载测试 (需先启动服务)
+uv run locust -f tools/load_test.py --users 50 --spawn-rate 10
+
 # 源码一致性验证
 uv run python tests/verify_models.py
 ```
@@ -232,15 +255,22 @@ uv run python tests/verify_models.py
 | 前端 | Vue 3 vs React/Ink 组件 | 20 | ✅ 已修复 |
 
 **全部 44 条差异已修复，详见 [audit/gaps.md](audit/gaps.md)**。
+**性能审计 43 条差距已识别，14 条 P0 已修复，详见 [audit/perf-gaps.md](audit/perf-gaps.md)**。
 
 **性能基准实测**：
 
 | 指标 | 结果 | 目标 |
 |------|------|------|
-| 冷启动 | 0.47s | ≤ 5s ✅ |
+| 冷启动 | 0.49s | ≤ 5s ✅ |
 | 4xRead 并行 | 0.12s | ≤ 0.2s ✅ |
 | 混合批执行 | 0.83s | ≤ 1.0s ✅ |
 | 内存泄漏 (500轮) | 5.3MB | ≤ 500MB ✅ |
+| Uvicorn 启动 | 0.54s | ≤ 3s ✅ |
+| 多轮对话 (50轮) | 0.10ms/轮 | ≤ 10ms/轮 ✅ |
+| Compact 管线 (180K tokens) | 71ms | ≤ 500ms ✅ |
+| CircuitBreaker 恢复 | 602ms | ≤ 5s ✅ |
+| 大上下文 (150K tokens) | 11ms | ≤ 1s ✅ |
+| SSE 解析 (100KB) | 63.4 MB/s | ≥ 1 MB/s ✅ |
 | Qwen E2E 单轮对话 | "Hello! How can I assist you today?" | completed ✅ |
 | DeepSeek E2E 单轮对话 | "Hello! How can I assist you today?" | completed ✅ |
 

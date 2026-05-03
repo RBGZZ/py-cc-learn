@@ -45,15 +45,22 @@ class QwenProvider(OpenAIProvider):
             "Content-Type": "application/json",
         }
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
+            if self._http_client is not None:
+                client = self._http_client
                 response = await client.post(
                     f"{self.config.base_url}/v1/chat/completions",
                     json=body, headers=headers,
                 )
-                if response.status_code != 200:
-                    yield StreamEvent(type="error", data={"message": f"HTTP {response.status_code}: {response.text[:200]}"})
-                    return
-                async for event in self._process_sse_stream(response):
-                    yield event
+            else:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
+                    response = await client.post(
+                        f"{self.config.base_url}/v1/chat/completions",
+                        json=body, headers=headers,
+                    )
+            if response.status_code != 200:
+                yield StreamEvent(type="error", data={"message": f"HTTP {response.status_code}: {response.text[:200]}"})
+                return
+            async for event in self._process_sse_stream(response):
+                yield event
         except Exception as exc:
             yield StreamEvent(type="error", data={"message": str(exc)})

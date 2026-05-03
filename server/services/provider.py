@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+import httpx
+
 
 class ProviderType(str, Enum):
     ANTHROPIC = "anthropic"
@@ -49,6 +51,10 @@ class Provider(ABC):
     def __init__(self, config: ProviderConfig) -> None:
         self.config = config
         self.name = ""
+        self._http_client: httpx.AsyncClient | None = None
+
+    def set_http_client(self, client: httpx.AsyncClient | None) -> None:
+        self._http_client = client
 
     @abstractmethod
     async def stream_chat(
