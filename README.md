@@ -1,4 +1,4 @@
-# py-cc-learn &nbsp;`v0.5.0`
+# py-cc-learn &nbsp;`v0.6.0`
 
 > **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 311 tests
 
@@ -10,8 +10,7 @@
 
 | 版本 | 状态 | 说明 |
 |------|------|------|
-| `v1.0.0` | ✅ 最新 | 安全加固：Shell注入修复/tree-sitter AST/权限检查/Docker加固/KDF/CSRF，安全评分 ≥90/100 |
-| `v1.0.0-rc1` | ✅ 已发布 | 生产落地审计：311 tests / CORS限制 / 注入检测 / 可观测性 / Docker / 故障演练 |
+| `v0.5.0` | ✅ 最新 | 安全加固：Shell注入修复/tree-sitter AST/权限检查/Docker加固/KDF/CSRF，安全评分 ≥90/100 |
 | `v0.4.0` | ✅ 已发布 | 需求评审系统 + MCP 完整集成 (SSE/HTTP/OAuth/连接管理/权限) |
 | `v0.3.5` | ✅ 已发布 | 性能全面完善：Token Budget重写 / Prompt Caching / Extended Thinking / P1修复 |
 | `v0.3.4` | ✅ 已发布 | 性能测试缺口补齐 + 深度性能审计（43 gaps, 14 P0 已修复） |
@@ -187,7 +186,7 @@ py-cc-learn/
 | Phase 21 | 需求评审 + MCP 完整集成 + 可选完善 | ✅ |
 | Phase 22 | 生产就绪发布 (RUNBOOK/审计/安全加固/311 tests) | ✅ |
 
-**92/92 Task 完成 · 383/383 Checklist 通过 · 311 tests passed · v1.0.0-rc1**
+**105/105 Task 完成 · 414/414 Checklist 通过 · 311 tests passed · v0.5.0**
 
 ---
 
