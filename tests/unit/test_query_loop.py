@@ -485,3 +485,59 @@ class TestStreamingExecutorIntegration:
 
         tool_results = [e for e in events if e.get("type") == "tool_result"]
         assert len(tool_results) >= 1
+
+
+class TestPromptTooLongRecovery:
+    def test_is_withheld_detects_api_error(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        msgs = [{"message": {"type": "assistant", "is_api_error_message": True, "content": [{"type": "text", "text": "prompt too long error"}]}}]
+        assert engine._is_withheld_prompt_too_long(msgs) is True
+
+    def test_is_withheld_no_api_error_returns_false(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        msgs = [{"message": {"type": "assistant", "content": [{"type": "text", "text": "normal"}]}}]
+        assert engine._is_withheld_prompt_too_long(msgs) is False
+
+    def test_ptl_recovery_three_stage(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        engine.state._has_attempted_collapse_drain = False
+        engine.state._has_attempted_reactive_compact = False
+        msgs = [{"message": {"type": "assistant", "is_api_error_message": True, "content": [{"type": "text", "text": "prompt too long"}]}}]
+        r1 = engine._try_prompt_too_long_recovery(msgs)
+        assert r1 == "retry"
+        assert engine.state._has_attempted_collapse_drain is True
+        r2 = engine._try_prompt_too_long_recovery(msgs)
+        assert r2 == "retry"
+        assert engine.state._has_attempted_reactive_compact is True
+        r3 = engine._try_prompt_too_long_recovery(msgs)
+        assert r3 == "surface"
+
+    def test_ptl_recovery_no_withheld(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        msgs = [{"message": {"type": "assistant", "content": [{"type": "text", "text": "ok"}]}}]
+        assert engine._try_prompt_too_long_recovery(msgs) is None
+
+
+class TestCompactBoundary:
+    def test_snip_compact_updates_boundary(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        for i in range(40):
+            engine.state.messages.append({"type": "user" if i % 2 == 0 else "assistant", "message": {"role": "user", "content": f"msg {i}"}})
+        old_boundary = engine.state._compact_boundary_index
+        removed = engine._try_snip_compact()
+        assert removed > 0
+
+    def test_snip_compact_too_few_messages(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test"))
+        for i in range(10):
+            engine.state.messages.append({"type": "user", "message": {"role": "user", "content": f"msg {i}"}})
+        removed = engine._try_snip_compact()
+        assert removed == 0
+
+    def test_check_auto_compact_triggers_pipeline(self):
+        engine = QueryEngine(QueryEngineConfig(tools=[], system_prompt="test", is_auto_compact_enabled=True))
+        for i in range(300):
+            engine.state.messages.append({"type": "user", "message": {"role": "user", "content": "x" * 100}})
+        engine.state.total_usage["input_tokens"] = 200_000
+        result = engine._check_auto_compact()
+        assert result is None or result == "blocking_limit"

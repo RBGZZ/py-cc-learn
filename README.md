@@ -1,6 +1,6 @@
-# py-cc-learn &nbsp;`v0.3.1`
+# py-cc-learn &nbsp;`v0.3.2`
 
-> **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 238 tests
+> **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 274 tests
 
 基于 [Claude Code Haha](https://github.com/anthropics/claude-code) 源码，使用 **Python 3.12+** (FastAPI) + **Vue 3** (Vite) 完整重写，支持多厂商模型后端。
 
@@ -10,11 +10,11 @@
 
 | 版本 | 状态 | 说明 |
 |------|------|------|
-| `v0.3.0` | ✅ 生产就绪 | 44/44 audit gaps resolved, 238 tests |
+| `v0.3.1` | ✅ 最新 | Qwen 适配 + 多 Provider 测试 + E2E 通过 |
+| `v0.3.0` | ✅ 已发布 | 44/44 audit gaps resolved, 生产就绪 |
 | `v0.2.1` | ✅ 已发布 | streaming fallback, PTL recovery, token budget |
 | `v0.2.0` | ✅ 已发布 | compact pipeline, AgentTool, permission UI |
-| `v0.1.3` | ✅ 已发布 | production audit complete (44 gaps identified) |
-| 目标 `v1.0` | ⬜ 计划中 | 需求评审 + 多模态
+| 目标 `v1.0` | ⬜ 计划中 | 多模态 + 需求评审
 
 **当前仍在积极开发中，不保证 API 稳定性。**
 
@@ -22,8 +22,8 @@
 
 ## ✨ 功能特性
 
-- **多厂商模型支持** — Anthropic / OpenAI / DeepSeek / Google，Provider 抽象层自动检测
-- **Web 前端** — Vue 3 + Vite + Pinia，SSE 流式响应，支持 Markdown 渲染、图片粘贴
+- **多厂商模型支持** — Anthropic / OpenAI / DeepSeek / Google / Qwen，Provider 抽象层自动检测
+- **Web 前端** — Vue 3 + Vite + Pinia，SSE 流式响应，权限对话框、Markdown 渲染、图片粘贴
 - **Docker 沙箱** — 容器预热池 + tree-sitter AST 安全校验 + 三层安全漏斗
 - **完整工具系统** — Bash / Read / Write / Edit / Glob / Grep / TodoWrite / WebSearch / WebFetch / Agent / Skill / PlanMode
 - **并行工具执行** — StreamingToolExecutor 流式并行调度，并发安全工具同时执行，非并发工具保持串行
@@ -63,6 +63,8 @@ cp .env.example .env
 #   DEEPSEEK_API_KEY=sk-xxx
 #   ANTHROPIC_API_KEY=sk-ant-xxx
 #   OPENAI_API_KEY=sk-xxx
+#   GOOGLE_API_KEY=xxx
+#   QWEN_API_KEY=sk-xxx
 
 # 4. 安装前端依赖并构建
 cd frontend
@@ -105,6 +107,7 @@ py-cc-learn/
 │   │   ├── anthropic_provider.py
 │   │   ├── openai_provider.py
 │   │   ├── deepseek_provider.py
+│   │   ├── qwen_provider.py    # 通义千问 Provider (OpenAI 兼容)
 │   │   ├── lsp.py             # LSP 语言服务器集成
 │   │   ├── mcp.py             # MCP 协议集成
 │   │   ├── permissions.py     # 权限决策管道
@@ -136,9 +139,9 @@ py-cc-learn/
 │   ├── nginx.conf             # 反向代理
 │   ├── docker-compose.yml     # 容器编排
 │   └── README.md              # 部署指南
-├── tests/                     # 237 单元/集成/E2E 测试
-├── tools/                     # 性能基准测试
-├── audit/                     # TS 源码对比审计报告
+├── tests/                     # 238 单元/集成/E2E 测试
+├── tools/                     # 性能基准 + E2E + 多 Provider 测试
+├── audit/                     # TS 源码对比审计报告 (44/44 resolved)
 ├── .trae/specs/python-rewrite/ # 技术规格文档
 └── .github/workflows/         # CI 跨平台矩阵
 ```
@@ -164,8 +167,9 @@ py-cc-learn/
 | Phase 12 | 性能对齐 TS 参考 (6 gaps) | ✅ |
 | Phase 13 | 生产就绪审计 (44 gaps) | ✅ |
 | Phase 14 | 审计差距修复 (44/44 resolved) | ✅ |
+| Phase 15 | Qwen 适配 + 多 Provider 测试 | ✅ |
 
-**49/49 Task 完成 · 293/293 Checklist 通过 · 238 tests passed · v0.3.0**
+**49/49 Task 完成 · 293/293 Checklist 通过 · 238 tests passed · v0.3.1**
 
 ---
 
@@ -193,14 +197,20 @@ uv run pytest tests/ --cov=server --cov-report=term
 # 并行工具执行性能基准
 uv run python tools/benchmark_real.py
 
+# 指定 Provider 基准测试
+uv run python tools/benchmark_real.py --provider qwen
+
+# 全部 Provider E2E 测试
+uv run python tools/test_providers.py
+
+# 单 Provider E2E 验证（需 API Key）
+uv run python tools/e2e_verify.py qwen
+
 # 冷启动性能基准
 uv run python tools/benchmark_cold_start.py
 
 # 内存泄漏检测
 uv run python tools/benchmark_memory.py
-
-# E2E 集成验证（需 API Key）
-uv run python tools/e2e_verify.py
 
 # 源码一致性验证
 uv run python tests/verify_models.py
@@ -212,13 +222,15 @@ uv run python tests/verify_models.py
 
 本版本完成了一次完整的 TS 源码逐模块对比审计（[audit/gaps.md](audit/gaps.md)），覆盖 5 个维度：
 
-| 模块 | 审计范围 | 差异数 | P0 修复 |
-|------|----------|--------|---------|
-| 引擎层 | `query_engine.py` vs `query.ts` (1729行) | 14 | 3 已修 |
-| 工具系统 | 20 Python vs 45+ TS tools | 7 | 已标注 |
-| 服务层 | Provider / MCP / LSP / Compact | API 对齐 | — |
-| 基础设施 | State / Config / Auth / Messages | 对齐 | — |
-| 前端 | Vue 3 vs React/Ink 组件 | 20 | 计划 v0.2.0 |
+| 模块 | 审计范围 | 差异数 | 状态 |
+|------|----------|--------|------|
+| 引擎层 | `query_engine.py` vs `query.ts` (1729行) | 14 | ✅ 已修复 |
+| 工具系统 | 20 Python vs 45+ TS tools | 7 | ✅ 已修复 |
+| 服务层 | Provider / MCP / LSP / Compact | — | ✅ 对齐 |
+| 基础设施 | State / Config / Auth / Messages | — | ✅ 对齐 |
+| 前端 | Vue 3 vs React/Ink 组件 | 20 | ✅ 已修复 |
+
+**全部 44 条差异已修复，详见 [audit/gaps.md](audit/gaps.md)**。
 
 **性能基准实测**：
 
@@ -228,7 +240,8 @@ uv run python tests/verify_models.py
 | 4xRead 并行 | 0.12s | ≤ 0.2s ✅ |
 | 混合批执行 | 0.83s | ≤ 1.0s ✅ |
 | 内存泄漏 (500轮) | 5.3MB | ≤ 500MB ✅ |
-| E2E 单轮对话 (DeepSeek v4) | "Hello! How can I assist you today?" | completed ✅ |
+| Qwen E2E 单轮对话 | "Hello! How can I assist you today?" | completed ✅ |
+| DeepSeek E2E 单轮对话 | "Hello! How can I assist you today?" | completed ✅ |
 
 ---
 

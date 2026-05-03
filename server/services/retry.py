@@ -95,11 +95,11 @@ class CircuitBreaker:
         async with self._lock:
             self._failure_count += 1
             self._last_failure_time = time.monotonic()
-            if (
-                self._failure_count >= self.config.failure_threshold
-                and self._state == CircuitState.CLOSED
-            ):
-                self._state = CircuitState.OPEN
+            if self._failure_count >= self.config.failure_threshold:
+                if self._state == CircuitState.CLOSED:
+                    self._state = CircuitState.OPEN
+                elif self._state == CircuitState.HALF_OPEN:
+                    self._state = CircuitState.OPEN
 
 
 class RetryConfig:

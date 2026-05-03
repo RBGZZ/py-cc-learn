@@ -13,12 +13,12 @@ class QwenProvider(OpenAIProvider):
     """Qwen provider using Alibaba DashScope OpenAI-compatible API."""
 
     def __init__(self, config: ProviderConfig) -> None:
+        if not config.base_url:
+            config.base_url = "https://dashscope.aliyuncs.com/compatible-mode"
+        if not config.model:
+            config.model = "qwen-plus"
         super().__init__(config)
         self.name = ProviderType.QWEN.value
-        if not config.base_url:
-            self.config.base_url = "https://dashscope.aliyuncs.com/compatible-mode"
-        if not config.model:
-            self.config.model = "qwen-plus"
 
     def get_default_model(self) -> str:
         return "qwen-plus"
