@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     google_api_key: str | None = Field(default=None)
     google_model: str = Field(default="gemini-2.0-flash")
 
+    # --- Qwen ---
+    qwen_api_key: str | None = Field(default=None)
+    qwen_model: str = Field(default="qwen-plus")
+
     # --- API ---
     api_timeout_ms: int = Field(default=600_000)
 

@@ -1,4 +1,4 @@
-# py-cc-learn &nbsp;`v0.1.3-pre`
+# py-cc-learn &nbsp;`v0.3.0`
 
 > **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; ⚠️ 预发布版本，仍在积极开发中
 
@@ -10,10 +10,11 @@
 
 | 版本 | 状态 | 说明 |
 |------|------|------|
-| `v0.1.3-pre` | 🟡 预发布 | 生产就绪审计完成 (44 gaps identified, 3 P0 fixed) |
-| `v0.1.2-pre` | ✅ 已发布 | 性能对齐 TS 参考，6 gaps closed |
-| `v0.1.1-pre` | ✅ 已发布 | 并行工具执行 + CI 修复 |
-| 目标 `v0.2.0` | ⬜ 计划中 | 上下文压缩管线 + 前端权限对话框 + 恢复路径完善
+| `v0.3.0` | ✅ 生产就绪 | 44/44 audit gaps resolved, 238 tests |
+| `v0.2.1` | ✅ 已发布 | streaming fallback, PTL recovery, token budget |
+| `v0.2.0` | ✅ 已发布 | compact pipeline, AgentTool, permission UI |
+| `v0.1.3` | ✅ 已发布 | production audit complete (44 gaps identified) |
+| 目标 `v1.0` | ⬜ 计划中 | 需求评审 + 多模态
 
 **当前仍在积极开发中，不保证 API 稳定性。**
 
@@ -158,12 +159,13 @@ py-cc-learn/
 | Phase 7 | 子 Agent + 扩展工具 | ✅ |
 | Phase 8 | Vue 3 Web 前端 | ✅ |
 | Phase 9 | FastAPI 路由 + CLI + Git + 图像 + LSP + MCP | ✅ |
-| Phase 10 | 测试 (237 tests) + CI | ✅ |
+| Phase 10 | 测试 (238 tests) + CI | ✅ |
 | Phase 11 | 部署 + 验收 | ✅ |
-| Phase 12 | 性能对齐 TS 参考 (6 gaps closed) | ✅ |
-| Phase 13 | 生产就绪审计 (44 gaps, 3 P0 fixed) | ✅ |
+| Phase 12 | 性能对齐 TS 参考 (6 gaps) | ✅ |
+| Phase 13 | 生产就绪审计 (44 gaps) | ✅ |
+| Phase 14 | 审计差距修复 (44/44 resolved) | ✅ |
 
-**49/49 Task 完成 · 293/293 Checklist 通过 · 237 tests passed · v0.1.3-pre**
+**49/49 Task 完成 · 293/293 Checklist 通过 · 238 tests passed · v0.3.0**
 
 ---
 

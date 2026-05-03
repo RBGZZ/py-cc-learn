@@ -8,6 +8,7 @@ from server.services.anthropic_provider import AnthropicProvider
 from server.services.deepseek_provider import DeepSeekProvider
 from server.services.google_provider import GoogleProvider
 from server.services.openai_provider import OpenAIProvider
+from server.services.qwen_provider import QwenProvider
 from server.services.provider import (
     Provider,
     ProviderConfig,
@@ -87,6 +88,8 @@ class ProviderFactory:
             return ProviderType.OPENAI
         if settings.deepseek_api_key and settings.deepseek_api_key not in ("your_key_here", ""):
             return ProviderType.DEEPSEEK
+        if settings.qwen_api_key and settings.qwen_api_key not in ("your_qwen_key_here", ""):
+            return ProviderType.QWEN
         if settings.google_api_key and settings.google_api_key not in ("your_key_here", ""):
             return ProviderType.GOOGLE
         return ProviderType.ANTHROPIC
@@ -116,6 +119,10 @@ class ProviderFactory:
             config.api_key = settings.google_api_key or ""
             config.model = settings.google_model
             config.base_url = "https://generativelanguage.googleapis.com"
+        elif provider_type == ProviderType.QWEN:
+            config.api_key = settings.qwen_api_key or ""
+            config.model = settings.qwen_model or "qwen-plus"
+            config.base_url = "https://dashscope.aliyuncs.com/compatible-mode"
 
         if override:
             if override.api_key:
@@ -145,6 +152,8 @@ class ProviderFactory:
             return DeepSeekProvider(config)
         elif provider_type == ProviderType.GOOGLE:
             return GoogleProvider(config)
+        elif provider_type == ProviderType.QWEN:
+            return QwenProvider(config)
         else:
             return AnthropicProvider(config)
 

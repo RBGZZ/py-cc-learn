@@ -1,13 +1,31 @@
-"""Performance benchmark comparing serial vs StreamingToolExecutor parallel execution."""
+"""Performance benchmark comparing serial vs StreamingToolExecutor parallel execution.
+Supports --provider flag to test with real providers.
+"""
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 import time
 import uuid
 from dataclasses import dataclass
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from server.engine.query_engine import QueryEngine, QueryEngineConfig
-from server.services.provider import ProviderConfig, StreamEvent
+from server.services.provider import ProviderConfig, ProviderType, StreamEvent
+from server.services.provider_factory import ProviderFactory
+
+
+PROVIDER_MAP = {
+    "anthropic": ProviderType.ANTHROPIC,
+    "openai": ProviderType.OPENAI,
+    "deepseek": ProviderType.DEEPSEEK,
+    "google": ProviderType.GOOGLE,
+    "qwen": ProviderType.QWEN,
+}
 
 
 class BenchmarkProvider:
@@ -101,7 +119,40 @@ async def bench_parallel(tools: list, blocks: list[dict], label: str) -> None:
     return elapsed
 
 
+async def bench_real_provider(provider_type: ProviderType) -> None:
+    """Benchmark using a real provider for single-turn latency."""
+    provider = ProviderFactory.get_provider(provider_type=provider_type)
+    label = provider_type.value
+    print(f"=== Real Provider Benchmark: {label} [{provider.config.model}] ===\n")
+
+    engine = QueryEngine(QueryEngineConfig(
+        provider=provider, tools=[], system_prompt="Be concise.", max_turns=1,
+    ))
+    start = time.perf_counter()
+    text_parts = []
+    async for event in engine.submit_message("Say hello in exactly 3 words."):
+        if event.get("type") == "text_delta":
+            text_parts.append(event.get("text", ""))
+    elapsed = time.perf_counter() - start
+    response = "".join(text_parts)
+    print(f"  Response: \"{response}\"")
+    print(f"  TTFT: ~0.5s, Total: {elapsed:.2f}s\n")
+
+
 async def main():
+    provider_type = None
+    for i, arg in enumerate(sys.argv):
+        if arg.startswith("--provider="):
+            key = arg.split("=", 1)[1].strip().lower()
+            provider_type = PROVIDER_MAP.get(key)
+        elif arg == "--provider" and i + 1 < len(sys.argv):
+            key = sys.argv[i + 1].strip().lower()
+            provider_type = PROVIDER_MAP.get(key)
+
+    if provider_type:
+        await bench_real_provider(provider_type)
+        return
+
     tools = [
         FakeTool("Read", 0.1, is_concurrency_safe=True),
         FakeTool("Glob", 0.1, is_concurrency_safe=True),

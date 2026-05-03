@@ -12,6 +12,7 @@ class ProviderType(str, Enum):
     OPENAI = "openai"
     DEEPSEEK = "deepseek"
     GOOGLE = "google"
+    QWEN = "qwen"
 
 
 @dataclass
