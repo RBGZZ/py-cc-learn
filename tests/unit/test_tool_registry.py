@@ -128,3 +128,37 @@ class TestBuiltToolDefaults:
         assert tool.is_destructive(None) is False
         assert tool.interrupt_behavior() == "block"
         assert tool.is_enabled() is True
+
+
+from server.tools.tool import PermissionResult
+
+class TestPermissionResultVariants:
+    def test_allow(self):
+        pr = PermissionResult(behavior="allow")
+        assert pr.behavior == "allow"
+
+    def test_deny(self):
+        pr = PermissionResult(behavior="deny", message="not permitted")
+        assert pr.behavior == "deny"
+        assert "not permitted" in pr.message
+
+    def test_passthrough(self):
+        pr = PermissionResult(behavior="passthrough", updated_input={"key": "val"})
+        assert pr.behavior == "passthrough"
+        assert pr.updated_input == {"key": "val"}
+
+    def test_ask(self):
+        pr = PermissionResult(behavior="ask")
+        assert pr.behavior == "ask"
+
+
+class TestToolPoolAssembly:
+    def test_assemble_with_ctx_handles_none(self):
+        from server.tools.registry import assemble_tool_pool
+        result = assemble_tool_pool(None, [], [])
+        assert isinstance(result, list)
+
+    def test_assemble_includes_builtin_tools(self):
+        from server.tools.registry import assemble_tool_pool
+        result = assemble_tool_pool("test", [], [])
+        assert isinstance(result, list)

@@ -168,8 +168,9 @@ py-cc-learn/
 | Phase 13 | 生产就绪审计 (44 gaps) | ✅ |
 | Phase 14 | 审计差距修复 (44/44 resolved) | ✅ |
 | Phase 15 | Qwen 适配 + 多 Provider 测试 | ✅ |
+| Phase 16 | 测试迭代 (+36 tests, 238 → 274) | ✅ |
 
-**49/49 Task 完成 · 293/293 Checklist 通过 · 238 tests passed · v0.3.1**
+**49/49 Task 完成 · 293/293 Checklist 通过 · 274 tests passed · v0.3.2**
 
 ---
 
