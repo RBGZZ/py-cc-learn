@@ -363,7 +363,8 @@ class QueryEngine:
                         return
 
             except asyncio.CancelledError:
-                self._yield_missing_tool_results(assistant_msgs, "Interrupted by user", None)
+                for ev in self._yield_missing_tool_results(assistant_msgs, "Interrupted by user", None):
+                    yield ev
                 yield _make_interruption_message()
                 yield {
                     "type": "exit",
@@ -382,9 +383,10 @@ class QueryEngine:
                     }
                     needs_follow_up = True
                 else:
-                    self._yield_missing_tool_results(
+                    for ev in self._yield_missing_tool_results(
                         assistant_msgs, f"Model error: {exc}", None
-                    )
+                    ):
+                        yield ev
                     yield {"type": "error", "data": {"message": f"Model invocation failed: {exc}"}}
                     yield {"type": "exit", "data": {"reason": QueryExitReason.MODEL_ERROR.value}}
                     return
@@ -399,7 +401,8 @@ class QueryEngine:
                     if update_msg is not None:
                         for ev in self._handle_tool_update(update_msg):
                             yield ev
-                self._yield_missing_tool_results(assistant_msgs, "Interrupted by user", None)
+                for ev in self._yield_missing_tool_results(assistant_msgs, "Interrupted by user", None):
+                    yield ev
                 yield _make_interruption_message()
                 yield {
                     "type": "exit",
@@ -667,7 +670,7 @@ class QueryEngine:
         assistant_msgs: list[dict[str, Any]],
         error_message: str,
         _executor: Any,
-    ) -> None:
+    ) -> Generator[dict[str, Any], None, None]:
         for assistant_msg in assistant_msgs:
             tool_blocks = self._extract_tool_blocks(assistant_msg)
             for tb in tool_blocks:
@@ -684,6 +687,10 @@ class QueryEngine:
                     "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
                 }
                 self.state.messages.append(user_result_msg)
+                yield {
+                    "type": "tool_result",
+                    "data": error_block,
+                }
 
     def _execute_post_sampling_hooks(self, assistant_msgs: list[dict[str, Any]]) -> None:
         for hook in self._hooks:
@@ -722,10 +729,41 @@ class QueryEngine:
 
         estimated_tokens = self._compute_estimated_tokens()
 
-        if estimated_tokens >= AUTO_COMPACT_TOKEN_THRESHOLD:
+        if estimated_tokens < AUTO_COMPACT_TOKEN_THRESHOLD:
+            return None
+
+        snip_result = self._try_snip_compact()
+        mc_result = self._try_microcompact()
+        tokens_freed = snip_result + mc_result
+        if tokens_freed > 0:
+            self.state._compact_boundary_index = max(0, len(self.state.messages) - 20)
+
+        new_estimate = self._compute_estimated_tokens()
+        if new_estimate >= AUTO_COMPACT_TOKEN_THRESHOLD:
             return QueryExitReason.BLOCKING_LIMIT.value
 
         return None
+
+    def _try_snip_compact(self) -> int:
+        msgs = self.state.messages
+        if len(msgs) <= 30:
+            return 0
+        keep_turns = 20
+        removed = 0
+        for i in range(len(msgs) - keep_turns):
+            if msgs[i].get("type") in ("user", "assistant"):
+                msgs[i] = {**msgs[i], "_snipped": True}
+                removed += 1
+        return removed
+
+    def _try_microcompact(self) -> int:
+        try:
+            from server.services.compact import microcompact_messages
+            result = microcompact_messages(self.state.messages)
+            tokens_saved = result.get("tokens_saved", 0)
+            return int(tokens_saved)
+        except Exception:
+            return 0
 
     def _compute_estimated_tokens(self) -> int:
         usage = self.state.total_usage

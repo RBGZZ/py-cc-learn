@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 import uuid
@@ -22,6 +23,8 @@ from server.tools.tool import (
 )
 
 SUBAGENT_TIMEOUT_MS = 300_000
+
+_logger = logging.getLogger(__name__)
 
 AGENT_TYPE_DESCRIPTIONS: dict[str, str] = {
     "general-purpose": "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries use this agent to perform the search for you.",
@@ -58,9 +61,16 @@ class AgentOutput(BaseModel):
     status: str = Field(default="completed")
     tool_use_count: int = Field(default=0)
     elapsed_ms: float = Field(default=0)
+    total_tokens: int = Field(default=0)
+    prompt: str = Field(default="")
+    content: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SubagentContext:
+    """Per-invocation context for a subagent run.
+    TS reference: AgentTool.tsx runWithAgentContext() + createSubagentContext().
+    """
+
     def __init__(
         self,
         parent_abort: asyncio.Event | None = None,
@@ -97,13 +107,10 @@ class SubagentContext:
         for t in tools:
             name = getattr(t, "name", "")
             name_lower = name.lower()
-
             if self.disallowed_tools and name_lower in {n.lower() for n in self.disallowed_tools}:
                 continue
-
             if self.allowed_tools and name_lower not in {n.lower() for n in self.allowed_tools}:
                 continue
-
             result.append(t)
         return result
 
@@ -115,6 +122,14 @@ class SubagentContext:
 
 
 class AgentTool(Tool[AgentInput, AgentOutput, Any]):
+    """AgentTool - delegates work to a subagent.
+    Before using, the hosting engine must set _parent_tools and _parent_provider.
+    TS reference: AgentTool.tsx call() assembles workerTools via assembleToolPool().
+    """
+
+    _parent_tools: list[Any] | None = None
+    _parent_provider: Any = None
+
     @property
     def name(self) -> str:
         return "Agent"
@@ -141,18 +156,6 @@ class AgentTool(Tool[AgentInput, AgentOutput, Any]):
     def is_read_only(self, input: AgentInput | None = None) -> bool:
         return True
 
-    def is_destructive(self, input: AgentInput | None = None) -> bool:
-        return False
-
-    def requires_user_interaction(self) -> bool:
-        return False
-
-    def is_open_world(self, input: AgentInput | None = None) -> bool:
-        return True
-
-    def get_path(self, input: AgentInput) -> str | None:
-        return None
-
     async def validate_input(self, input: AgentInput, context: Any) -> ValidationResult:
         errors: list[str] = []
         if not input.description or not input.description.strip():
@@ -161,18 +164,12 @@ class AgentTool(Tool[AgentInput, AgentOutput, Any]):
             errors.append("prompt is required")
         return ValidationResult(valid=len(errors) == 0, errors=errors)
 
-    async def check_permissions(
-        self, input: dict[str, Any], context: Any = None
-    ) -> PermissionResult:
+    async def check_permissions(self, input: dict[str, Any], context: Any = None) -> PermissionResult:
         return PermissionResult(behavior="allow", updated_input=input)
 
     async def call(
-        self,
-        args: AgentInput,
-        context: Any,
-        can_use_tool: Any = None,
-        parent_message: Any = None,
-        on_progress: Any = None,
+        self, args: AgentInput, context: Any, can_use_tool: Any = None,
+        parent_message: Any = None, on_progress: Any = None,
     ) -> ToolCallResult:
         task_id = generate_task_id(TaskType.LOCAL_AGENT)
         agent_id = str(uuid.uuid4())[:8]
@@ -187,129 +184,121 @@ class AgentTool(Tool[AgentInput, AgentOutput, Any]):
         disallowed = set(args.disallowed_tools) if args.disallowed_tools else None
 
         subagent_ctx = SubagentContext(
-            parent_abort=parent_abort,
-            allowed_tools=allowed,
-            disallowed_tools=disallowed,
-            subagent_type=args.subagent_type,
+            parent_abort=parent_abort, allowed_tools=allowed,
+            disallowed_tools=disallowed, subagent_type=args.subagent_type,
         )
 
         task_state = create_task_state_base(
-            task_id=task_id,
-            task_type=TaskType.LOCAL_AGENT,
+            task_id=task_id, task_type=TaskType.LOCAL_AGENT,
             description=args.description,
             tool_use_id=parent_message.get("uuid") if isinstance(parent_message, dict) else None,
         )
         task_state.status = TaskStatus.RUNNING
 
         try:
-            result_text = await self._run_subagent(args, subagent_ctx)
-
+            result_dict = await self._run_subagent(args, subagent_ctx)
             task_state.status = TaskStatus.COMPLETED
             task_state.end_time = int(time.time() * 1000)
 
+            output = AgentOutput(
+                agent_id=agent_id, task_id=task_id,
+                result=result_dict["result_text"],
+                status=result_dict.get("status", "completed"),
+                tool_use_count=result_dict["tool_use_count"],
+                elapsed_ms=subagent_ctx.elapsed_ms,
+                total_tokens=result_dict["total_tokens"],
+                prompt=args.prompt, content=result_dict["content"],
+            )
             return ToolCallResult(
-                data=AgentOutput(
-                    agent_id=agent_id,
-                    task_id=task_id,
-                    result=result_text,
-                    status="completed",
-                    elapsed_ms=subagent_ctx.elapsed_ms,
-                ),
-                new_messages=[
-                    {
-                        "type": "text",
-                        "text": f"[Agent {agent_id}] {result_text}",
-                    }
-                ],
+                data=output,
+                new_messages=[{"type": "text", "text": f"[Agent {agent_id}] {output.result}"}],
             )
         except asyncio.CancelledError:
             task_state.status = TaskStatus.KILLED
-            return ToolCallResult(
-                data=AgentOutput(
-                    agent_id=agent_id,
-                    task_id=task_id,
-                    result="Agent was cancelled by user",
-                    status="killed",
-                    elapsed_ms=subagent_ctx.elapsed_ms,
-                ),
-            )
+            return ToolCallResult(data=AgentOutput(
+                agent_id=agent_id, task_id=task_id,
+                result="Agent was cancelled by user", status="killed",
+                elapsed_ms=subagent_ctx.elapsed_ms,
+            ))
         except Exception as exc:
             task_state.status = TaskStatus.FAILED
-            return ToolCallResult(
-                data=AgentOutput(
-                    agent_id=agent_id,
-                    task_id=task_id,
-                    result=f"Agent failed: {exc}",
-                    status="failed",
-                    elapsed_ms=subagent_ctx.elapsed_ms,
-                ),
-            )
+            return ToolCallResult(data=AgentOutput(
+                agent_id=agent_id, task_id=task_id,
+                result=f"Agent failed: {exc}", status="failed",
+                elapsed_ms=subagent_ctx.elapsed_ms,
+            ))
 
-    async def _run_subagent(self, args: AgentInput, ctx: SubagentContext) -> str:
-        if not hasattr(self, "_parent_tools"):
-            subagent_description = AGENT_TYPE_DESCRIPTIONS.get(
-                args.subagent_type,
-                AGENT_TYPE_DESCRIPTIONS["general-purpose"],
-            )
-            return (
-                f"I would run the subagent of type '{args.subagent_type}' "
-                f"for task: '{args.prompt}'. "
-                "Subagent execution requires the full query engine infrastructure."
-            )
+    async def _run_subagent(self, args: AgentInput, ctx: SubagentContext) -> dict[str, Any]:
+        parent_tools = getattr(self, "_parent_tools", None)
+        if not parent_tools:
+            return {
+                "result_text": f"I would run the subagent of type '{args.subagent_type}' for task: '{args.prompt}'. Subagent execution requires the full query engine infrastructure.",
+                "tool_use_count": 0, "total_tokens": 0, "status": "completed",
+                "content": [{"type": "text", "text": AGENT_TYPE_DESCRIPTIONS.get(args.subagent_type, "")}],
+            }
 
         from server.engine.query_engine import QueryEngine, QueryEngineConfig
 
-        subagent_tools = ctx.filter_tools(getattr(self, "_parent_tools", []))
+        subagent_tools = ctx.filter_tools(parent_tools)
         if not subagent_tools:
-            return f"No tools available for agent type '{args.subagent_type}'"
+            return {
+                "result_text": f"No tools available for agent type '{args.subagent_type}'",
+                "tool_use_count": 0, "total_tokens": 0, "status": "completed",
+                "content": [{"type": "text", "text": f"No tools available"}],
+            }
 
-        subagent_prompt_parts: list[str] = []
-        subagent_description = AGENT_TYPE_DESCRIPTIONS.get(
-            args.subagent_type,
-            AGENT_TYPE_DESCRIPTIONS["general-purpose"],
-        )
-        subagent_prompt_parts.append(subagent_description)
-        subagent_prompt_parts.append(
-            "Complete the task fully - don't leave it half-done. "
-            "When you complete the task, respond with a concise report."
-        )
+        prompt_parts = [
+            AGENT_TYPE_DESCRIPTIONS.get(args.subagent_type, AGENT_TYPE_DESCRIPTIONS["general-purpose"]),
+            "Complete the task fully — don't leave it half-done. When you complete the task, respond with a concise report.",
+        ]
         if args.context:
-            subagent_prompt_parts.append(f"Additional context: {args.context}")
+            prompt_parts.append(f"Additional context: {args.context}")
 
-        subagent_engine = QueryEngine(
-            QueryEngineConfig(
-                cwd=os.getcwd(),
-                tools=subagent_tools,
-                provider=getattr(self, "_parent_provider", None),
-                system_prompt="\n".join(subagent_prompt_parts),
-                max_turns=10,
-                abort_signal=ctx.abort_controller,
-            )
-        )
+        subagent_engine = QueryEngine(QueryEngineConfig(
+            cwd=os.getcwd(), tools=subagent_tools,
+            provider=getattr(self, "_parent_provider", None),
+            system_prompt="\n".join(prompt_parts),
+            max_turns=10, abort_signal=ctx.abort_controller,
+        ))
 
         result_parts: list[str] = []
+        tool_use_count = 0
+        total_tokens = 0
+        subagent_status = "completed"
+
         try:
             async with asyncio.timeout(SUBAGENT_TIMEOUT_MS / 1000):
                 async for event in subagent_engine.submit_message(args.prompt):
                     if ctx.is_aborted:
                         result_parts.append("[aborted by user]")
+                        subagent_status = "aborted"
                         break
-
                     event_type = event.get("type", "")
-                    if event_type == "text_delta":
+                    if event_type == "tool_use":
+                        tool_use_count += 1
+                    elif event_type == "text_delta":
                         result_parts.append(event.get("text", ""))
                     elif event_type == "error":
                         result_parts.append(f"[Error: {event.get('data', '')}]")
+                        subagent_status = "error"
                         break
                     elif event_type == "result":
+                        usage = event.get("usage", {})
+                        total_tokens = usage.get("total_tokens", 0) if isinstance(usage, dict) else 0
                         break
         except TimeoutError:
-            result_parts.append("[timeout]")
+            result_parts.append(f"[timeout: subagent exceeded {SUBAGENT_TIMEOUT_MS / 1000:.0f}s limit]")
+            subagent_status = "timeout"
+            _logger.warning("Subagent timeout after %dms: %d tool uses", SUBAGENT_TIMEOUT_MS, tool_use_count)
 
-        return "".join(result_parts) if result_parts else "Task completed."
+        result_text = "".join(result_parts) if result_parts else "Task completed."
+        return {
+            "result_text": result_text, "tool_use_count": tool_use_count,
+            "total_tokens": total_tokens, "status": subagent_status,
+            "content": [{"type": "text", "text": result_text}] if result_text else [],
+        }
 
     async def description(self, input: AgentInput, options: dict[str, Any]) -> str:
-        agent_type_desc = AGENT_TYPE_DESCRIPTIONS.get(input.subagent_type, "")
         return f"Launch {input.subagent_type} agent: {input.description}"
 
     async def prompt(self, options: dict[str, Any]) -> str:
@@ -321,13 +310,20 @@ class AgentTool(Tool[AgentInput, AgentOutput, Any]):
     def to_auto_classifier_input(self, input: AgentInput) -> Any:
         return input.description
 
-    def map_tool_result_to_tool_result_block_param(
-        self, content: AgentOutput, tool_use_id: str
-    ) -> Any:
+    def map_tool_result_to_tool_result_block_param(self, content: AgentOutput, tool_use_id: str) -> Any:
+        if content.status == "completed":
+            output_blocks: list[dict[str, Any]] = list(content.content) if content.content else []
+            if not output_blocks:
+                output_blocks.append({"type": "text", "text": "(Subagent completed but returned no output.)"})
+            output_blocks.append({
+                "type": "text", "text": (
+                    f"<usage>total_tokens: {content.total_tokens}\ntool_uses: {content.tool_use_count}\nduration_ms: {int(content.elapsed_ms)}</usage>"
+                ),
+            })
+            return {"type": "tool_result", "tool_use_id": tool_use_id, "content": output_blocks}
         return {
-            "type": "tool_result",
-            "tool_use_id": tool_use_id,
-            "content": content.model_dump(),
+            "type": "tool_result", "tool_use_id": tool_use_id,
+            "content": [{"type": "text", "text": content.result or f"Agent status: {content.status}"}],
         }
 
     def render_tool_use_message(self, input: dict[str, Any], options: dict[str, Any]) -> Any:

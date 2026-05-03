@@ -371,8 +371,13 @@ class TestYieldMissingToolResults:
             }
         ]
         assert len(engine.state.messages) == 0
-        engine._yield_missing_tool_results(assistant_msgs, "Test error", None)
+        results = list(engine._yield_missing_tool_results(assistant_msgs, "Test error", None))
         assert len(engine.state.messages) == 2
+        assert len(results) == 2
+        for r in results:
+            assert r["type"] == "tool_result"
+            assert r["data"]["is_error"] is True
+            assert "Test error" in r["data"]["content"]
         for msg in engine.state.messages:
             content = msg["message"]["content"]
             assert len(content) == 1
@@ -384,7 +389,7 @@ class TestYieldMissingToolResults:
         assistant_msgs = [
             {"message": {"content": [{"type": "text", "text": "hello"}]}}
         ]
-        engine._yield_missing_tool_results(assistant_msgs, "Test", None)
+        list(engine._yield_missing_tool_results(assistant_msgs, "Test", None))
         assert len(engine.state.messages) == 0
 
 

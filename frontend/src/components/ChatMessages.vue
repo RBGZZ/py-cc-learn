@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useChatStore } from '../stores/chat'
+import { usePermissionStore } from '../stores/permission'
+import type { PermissionBehavior } from '../stores/permission'
 import ChatMessage from './ChatMessage.vue'
 import LoadingSpinner from './LoadingSpinner.vue'
+import BashPermissionDialog from './BashPermissionDialog.vue'
+import FileEditPermissionDialog from './FileEditPermissionDialog.vue'
 
 const store = useChatStore()
+const permStore = usePermissionStore()
 
 const MESSAGES_PER_PAGE = 50
 
@@ -99,6 +104,15 @@ onBeforeUnmount(() => {
     messagesContainer.value.removeEventListener('scroll', handleScroll)
   }
 })
+
+const hasPermissionRequests = computed(() => permStore.pendingRequests.length > 0)
+
+function handlePermissionResponse(id: string, behavior: PermissionBehavior): void {
+  permStore.respondToRequest(id, behavior)
+  // The actual backend communication for permission response
+  // would be handled by the SSE layer or a dedicated API call.
+  // For now, we clean up the request from the store.
+}
 </script>
 
 <template>
@@ -121,6 +135,22 @@ onBeforeUnmount(() => {
     <!-- Message list -->
     <template v-for="msg in visibleMessages" :key="msg.id">
       <ChatMessage :message="msg" />
+    </template>
+
+    <!-- Permission dialogs -->
+    <template v-if="hasPermissionRequests">
+      <div v-for="req in permStore.pendingRequests" :key="req.id">
+        <BashPermissionDialog
+          v-if="req.toolName === 'Bash' || req.type === 'bash'"
+          :request="req"
+          @respond="(behavior: 'allow' | 'deny' | 'always_allow') => handlePermissionResponse(req.id, behavior)"
+        />
+        <FileEditPermissionDialog
+          v-else-if="req.toolName === 'Edit' || req.toolName === 'Write' || req.toolName === 'MultiEdit' || req.type === 'edit' || req.type === 'write'"
+          :request="req"
+          @respond="(behavior: 'allow' | 'deny') => handlePermissionResponse(req.id, behavior)"
+        />
+      </div>
     </template>
 
     <!-- Processing indicator -->

@@ -10,9 +10,10 @@
 
 | 版本 | 状态 | 说明 |
 |------|------|------|
-| `v0.1.2-pre` | 🟡 预发布 | 核心功能完成，性能对齐 TS 参考，6 gaps closed |
+| `v0.1.3-pre` | 🟡 预发布 | 生产就绪审计完成 (44 gaps identified, 3 P0 fixed) |
+| `v0.1.2-pre` | ✅ 已发布 | 性能对齐 TS 参考，6 gaps closed |
 | `v0.1.1-pre` | ✅ 已发布 | 并行工具执行 + CI 修复 |
-| 目标 `v0.2.0` | ⬜ 计划中 | 上下文压缩管线
+| 目标 `v0.2.0` | ⬜ 计划中 | 上下文压缩管线 + 前端权限对话框 + 恢复路径完善
 
 **当前仍在积极开发中，不保证 API 稳定性。**
 
@@ -136,6 +137,7 @@ py-cc-learn/
 │   └── README.md              # 部署指南
 ├── tests/                     # 237 单元/集成/E2E 测试
 ├── tools/                     # 性能基准测试
+├── audit/                     # TS 源码对比审计报告
 ├── .trae/specs/python-rewrite/ # 技术规格文档
 └── .github/workflows/         # CI 跨平台矩阵
 ```
@@ -159,8 +161,9 @@ py-cc-learn/
 | Phase 10 | 测试 (237 tests) + CI | ✅ |
 | Phase 11 | 部署 + 验收 | ✅ |
 | Phase 12 | 性能对齐 TS 参考 (6 gaps closed) | ✅ |
+| Phase 13 | 生产就绪审计 (44 gaps, 3 P0 fixed) | ✅ |
 
-**49/49 Task 完成 · 293/293 Checklist 通过 · 237 tests passed · v0.1.2-pre**
+**49/49 Task 完成 · 293/293 Checklist 通过 · 237 tests passed · v0.1.3-pre**
 
 ---
 
@@ -188,9 +191,42 @@ uv run pytest tests/ --cov=server --cov-report=term
 # 并行工具执行性能基准
 uv run python tools/benchmark_real.py
 
+# 冷启动性能基准
+uv run python tools/benchmark_cold_start.py
+
+# 内存泄漏检测
+uv run python tools/benchmark_memory.py
+
+# E2E 集成验证（需 API Key）
+uv run python tools/e2e_verify.py
+
 # 源码一致性验证
 uv run python tests/verify_models.py
 ```
+
+---
+
+## 🔍 生产就绪审计
+
+本版本完成了一次完整的 TS 源码逐模块对比审计（[audit/gaps.md](audit/gaps.md)），覆盖 5 个维度：
+
+| 模块 | 审计范围 | 差异数 | P0 修复 |
+|------|----------|--------|---------|
+| 引擎层 | `query_engine.py` vs `query.ts` (1729行) | 14 | 3 已修 |
+| 工具系统 | 20 Python vs 45+ TS tools | 7 | 已标注 |
+| 服务层 | Provider / MCP / LSP / Compact | API 对齐 | — |
+| 基础设施 | State / Config / Auth / Messages | 对齐 | — |
+| 前端 | Vue 3 vs React/Ink 组件 | 20 | 计划 v0.2.0 |
+
+**性能基准实测**：
+
+| 指标 | 结果 | 目标 |
+|------|------|------|
+| 冷启动 | 0.47s | ≤ 5s ✅ |
+| 4xRead 并行 | 0.12s | ≤ 0.2s ✅ |
+| 混合批执行 | 0.83s | ≤ 1.0s ✅ |
+| 内存泄漏 (500轮) | 5.3MB | ≤ 500MB ✅ |
+| E2E 单轮对话 (DeepSeek v4) | "Hello! How can I assist you today?" | completed ✅ |
 
 ---
 
