@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator, Callable, Generator
@@ -398,8 +399,24 @@ class QueryEngine:
         tool_schemas = self._build_tool_schemas()
         max_tokens = self.state.max_output_tokens_override or getattr(self.config.provider.config, "max_tokens", MAX_OUTPUT_TOKENS_DEFAULT)
         self.config.provider.config.max_tokens = max_tokens
+
+        call_start = time.perf_counter()
+        ttft = None
+
         async for event in self.config.provider.stream_chat(messages=messages_for_api, system_prompt=self._system_prompt, tools=tool_schemas):
+            if ttft is None and event.type == "text_delta":
+                ttft = time.perf_counter() - call_start
             yield {"type": event.type, "data": event.data}
+
+        elapsed = time.perf_counter() - call_start
+        logger = logging.getLogger("query_engine")
+        logger.info(
+            "llm_call_complete",
+            ttft_ms=round((ttft or 0) * 1000, 1),
+            total_ms=round(elapsed * 1000, 1),
+            model=getattr(self.config.provider, "config", None) and
+                  getattr(self.config.provider.config, "model", "unknown"),
+        )
 
     def _build_messages_for_api(self) -> list[dict[str, Any]]:
         api_messages: list[dict[str, Any]] = []

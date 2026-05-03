@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
+import time
 from typing import Any
 
 from server.utils import tokens as token_utils
@@ -460,6 +462,8 @@ async def auto_compact_if_needed(
     if not should_compact:
         return {"was_compacted": False}
 
+    compact_start = time.perf_counter()
+
     try:
         compact_prompt = get_compact_prompt()
         summary_request = {
@@ -490,6 +494,10 @@ async def auto_compact_if_needed(
             "was_compacted": True,
             "consecutive_failures": 0,
         }
+
+        compact_elapsed = time.perf_counter() - compact_start
+        logger = logging.getLogger("compact")
+        logger.info("compact_complete", duration_ms=round(compact_elapsed * 1000, 1))
 
         return compact_result
     except Exception:

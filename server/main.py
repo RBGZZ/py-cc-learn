@@ -85,6 +85,11 @@ def _validate_prompt(prompt: str) -> None:
         for c in stripped
     ):
         raise ValueError("prompt must not consist entirely of control characters")
+    from server.utils.security import detect_injection
+
+    injections = detect_injection(prompt)
+    if injections:
+        raise ValueError("prompt contains injection patterns")
 
 
 def _get_tools():
@@ -210,12 +215,24 @@ async def proxy_fix_middleware(request: Request, call_next):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:8000").split(","),
+    allow_credentials=True if os.environ.get("CORS_ALLOW_CREDENTIALS", "true").lower() == "true" else False,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Request-ID", "Retry-After"],
 )
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    return response
+
 
 app.add_middleware(SlowAPIMiddleware)
 

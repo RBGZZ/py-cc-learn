@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
+import time
 from collections.abc import AsyncGenerator, Callable, Generator
 from dataclasses import dataclass, field
 from typing import Any
@@ -426,6 +428,8 @@ class StreamingToolExecutor:
 
             abort_task = asyncio.create_task(on_abort())
 
+            tool_start = time.perf_counter()
+
             try:
                 this_tool_errored = False
 
@@ -491,6 +495,9 @@ class StreamingToolExecutor:
             except Exception:
                 pass
             finally:
+                tool_elapsed = time.perf_counter() - tool_start
+                logger = logging.getLogger("streaming")
+                logger.info("tool_executed", tool=tool.block.name, duration_ms=round(tool_elapsed * 1000, 1))
                 abort_task.cancel()
                 try:
                     await abort_task

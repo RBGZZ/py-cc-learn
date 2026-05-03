@@ -65,10 +65,12 @@ class GoogleProvider(Provider):
         url = (
             f"{self.config.base_url}/v1beta/models/"
             f"{self.config.model}:streamGenerateContent"
-            f"?key={self.config.api_key}"
         )
 
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.config.api_key,
+        }
 
         retry_config = RetryConfig(
             max_retries=self.config.max_retries,

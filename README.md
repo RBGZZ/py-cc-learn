@@ -1,6 +1,6 @@
-# py-cc-learn &nbsp;`v0.4.0`
+# py-cc-learn &nbsp;`v1.0.0-rc1`
 
-> **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 295 tests
+> **AI 编程助手** — Claude Code 架构的 Python 重写 &nbsp;|&nbsp; 5 厂商 Provider &nbsp;|&nbsp; 311 tests
 
 基于 [Claude Code Haha](https://github.com/anthropics/claude-code) 源码，使用 **Python 3.12+** (FastAPI) + **Vue 3** (Vite) 完整重写，支持多厂商模型后端。
 
@@ -10,7 +10,8 @@
 
 | 版本 | 状态 | 说明 |
 |------|------|------|
-| `v0.3.5` | ✅ 最新 | 性能全面完善：Token Budget重写 / Prompt Caching / Extended Thinking / P1修复 |
+| `v0.4.0` | ✅ 最新 | 需求评审系统 + MCP 完整集成 (SSE/HTTP/OAuth/连接管理/权限) |
+| `v0.3.5` | ✅ 已发布 | 性能全面完善：Token Budget重写 / Prompt Caching / Extended Thinking / P1修复 |
 | `v0.3.4` | ✅ 已发布 | 性能测试缺口补齐 + 深度性能审计（43 gaps, 14 P0 已修复） |
 | `v0.3.3` | ✅ 已发布 | 性能基线对齐：HTTP客户端复用 / tiktoken统一 / slowapi限流 |
 | `v0.3.2` | ✅ 已发布 | 测试迭代2 (+21 tests, 274→295) + compact model |
@@ -38,6 +39,8 @@
 - **上下文压缩** — Auto-Compact (180K token 阈值) + Reactive Compact + Context Collapse + compact_boundary_index
 - **Prompt Caching** — Anthropic prompt-caching-2024-07-31 beta，系统提示词 + 消息前缀缓存
 - **Extended Thinking** — Anthropic thinking.budget_tokens 支持，流式 thinking 事件解析
+- **需求评审** — ReviewTool 结构化需求文档分析（完整性/一致性/质量/风险评估）
+- **MCP 完整集成** — stdio/SSE/HTTP 传输 + 连接管理器 + OAuth + 通道权限 + 专属工具
 - **CLI 入口** — `python -m server.cli` 兼容 `--model` / `--resume` / `--cwd`
 - **结构化日志** — structlog + RotatingFileHandler + request_id 全链路追踪
 - **优雅关闭** — SIGTERM → 等待请求 → 清理子进程 → flush session → 退出
@@ -179,8 +182,9 @@ py-cc-learn/
 | Phase 18 | 性能测试缺口补齐 (6 项新基准) | ✅ |
 | Phase 19 | 深度性能审计 (6 模块, 43 gaps, 14 P0 修复) | ✅ |
 | Phase 20 | 性能全面完善 (TokenBudget/PromptCaching/ExtendedThinking/P1修复) | ✅ |
+| Phase 21 | 需求评审 + MCP 完整集成 + 可选完善 | ✅ |
 
-**79/79 Task 完成 · 352/352 Checklist 通过 · 295 tests passed · v0.3.5**
+**92/92 Task 完成 · 383/383 Checklist 通过 · 295 tests passed · v0.4.0**
 
 ---
 
